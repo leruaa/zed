@@ -26,6 +26,7 @@ use zed_actions::agent::{
     ResolveConflictedFilesWithAgent, ResolveConflictsWithAgent, ReviewBranchDiff,
 };
 
+use crate::ui::{AcpOnboardingModal, ClaudeCodeOnboardingModal, HoldForDefault};
 use crate::{
     AddContextServer, AgentDiffPane, ConversationView, CopyThreadToClipboard, CycleStartThreadIn,
     Follow, InlineAssistant, LoadThreadFromClipboard, NewTextThread, NewThread,
