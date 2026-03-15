@@ -14,6 +14,7 @@ use gpui::{
 };
 
 use crate::example_editor::ExampleEditor;
+use crate::example_render_log::RenderLog;
 use crate::{Backspace, Delete, End, Enter, Home, Left, Right};
 
 pub struct ExampleInputState {
@@ -25,8 +26,11 @@ pub struct ExampleInputState {
 }
 
 impl ExampleInputState {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let editor = cx.new(|cx| ExampleEditor::new(cx));
+    pub fn new(render_log: Entity<RenderLog>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let editor = cx.new(|cx| ExampleEditor::new(window, cx));
+        editor.update(cx, |e, _cx| {
+            e.render_log = Some(render_log);
+        });
         let focus_handle = editor.read(cx).focus_handle.clone();
 
         let focus_sub = cx.on_focus(&focus_handle, window, |this, _window, cx| {
@@ -51,14 +55,16 @@ impl ExampleInputState {
 #[derive(Hash, IntoViewElement)]
 pub struct ExampleInput {
     state: Entity<ExampleInputState>,
+    render_log: Entity<RenderLog>,
     width: Option<Pixels>,
     color: Option<Hsla>,
 }
 
 impl ExampleInput {
-    pub fn new(state: Entity<ExampleInputState>) -> Self {
+    pub fn new(state: Entity<ExampleInputState>, render_log: Entity<RenderLog>) -> Self {
         Self {
             state,
+            render_log,
             width: None,
             color: None,
         }
@@ -92,6 +98,9 @@ impl gpui::View for ExampleInput {
     }
 
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        self.render_log
+            .update(cx, |log, _cx| log.log("ExampleInput"));
+
         let input_state = self.state.read(cx);
         let count = input_state.flash_count;
         let editor = input_state.editor.clone();

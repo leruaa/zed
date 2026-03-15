@@ -7,15 +7,17 @@
 use gpui::{App, Entity, IntoViewElement, Window, div, hsla, prelude::*, px};
 
 use crate::example_editor::ExampleEditor;
+use crate::example_render_log::RenderLog;
 
 #[derive(Hash, IntoViewElement)]
 pub struct EditorInfo {
     editor: Entity<ExampleEditor>,
+    render_log: Entity<RenderLog>,
 }
 
 impl EditorInfo {
-    pub fn new(editor: Entity<ExampleEditor>) -> Self {
-        Self { editor }
+    pub fn new(editor: Entity<ExampleEditor>, render_log: Entity<RenderLog>) -> Self {
+        Self { editor, render_log }
     }
 }
 
@@ -27,6 +29,8 @@ impl gpui::View for EditorInfo {
     }
 
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        self.render_log.update(cx, |log, _cx| log.log("EditorInfo"));
+
         let editor = self.editor.read(cx);
         let char_count = editor.content.len();
         let cursor = editor.cursor;

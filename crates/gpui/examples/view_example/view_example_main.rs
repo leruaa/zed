@@ -30,6 +30,7 @@
 mod example_editor;
 mod example_editor_info;
 mod example_input;
+mod example_render_log;
 mod example_text_area;
 
 #[cfg(test)]
@@ -44,6 +45,7 @@ use gpui_platform::application;
 use example_editor::ExampleEditor;
 use example_editor_info::EditorInfo;
 use example_input::{ExampleInput, ExampleInputState};
+use example_render_log::{RenderLog, RenderLogPanel};
 use example_text_area::ExampleTextArea;
 
 actions!(
@@ -71,9 +73,18 @@ impl ViewExample {
 
 impl Render for ViewExample {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let input_state = window.use_state(cx, |window, cx| ExampleInputState::new(window, cx));
+        let render_log = window.use_state(cx, |_window, cx| RenderLog::new(cx));
+        let input_state = window.use_state(cx, {
+            let render_log = render_log.clone();
+            move |window, cx| ExampleInputState::new(render_log, window, cx)
+        });
         let input_editor = input_state.read(cx).editor.clone();
-        let textarea_editor = window.use_state(cx, |_window, cx| ExampleEditor::new(cx));
+        let textarea_editor = window.use_state(cx, |window, cx| ExampleEditor::new(window, cx));
+        textarea_editor.update(cx, |e, _cx| {
+            if e.render_log.is_none() {
+                e.render_log = Some(render_log.clone());
+            }
+        });
         let input_color = self.input_color;
         let textarea_color = self.textarea_color;
 
@@ -96,11 +107,11 @@ impl Render for ViewExample {
                             .child("Single-line input (View with own state + cached editor)"),
                     )
                     .child(
-                        ExampleInput::new(input_state)
+                        ExampleInput::new(input_state, render_log.clone())
                             .width(px(320.))
                             .color(input_color),
                     )
-                    .child(EditorInfo::new(input_editor)),
+                    .child(EditorInfo::new(input_editor, render_log.clone())),
             )
             .child(
                 div()
@@ -110,22 +121,12 @@ impl Render for ViewExample {
                     .child(div().text_sm().text_color(hsla(0., 0., 0.3, 1.)).child(
                         "Multi-line text area (TextArea — same entity type, different View)",
                     ))
-                    .child(ExampleTextArea::new(textarea_editor, 5).color(textarea_color)),
+                    .child(
+                        ExampleTextArea::new(textarea_editor, render_log.clone(), 5)
+                            .color(textarea_color),
+                    ),
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .mt(px(12.))
-                    .text_xs()
-                    .text_color(hsla(0., 0., 0.5, 1.))
-                    .child("• ExampleInput: View with own state — caches independently")
-                    .child("• EditorInfo: View on same editor — zero-wiring, auto-cached")
-                    .child("• ExampleTextArea: ComponentView — stateless wrapper")
-                    .child("• Press Enter in input to flash border (EditorInfo stays cached)")
-                    .child("• Type to see both input and info update reactively"),
-            )
+            .child(RenderLogPanel::new(render_log))
     }
 }
 

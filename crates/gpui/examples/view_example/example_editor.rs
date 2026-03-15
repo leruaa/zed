@@ -8,11 +8,12 @@ use std::time::Duration;
 
 use gpui::{
     App, Bounds, Context, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable,
-    LayoutId, PaintQuad, Pixels, ShapedLine, SharedString, Task, TextRun, UTF16Selection, Window,
-    fill, hsla, point, prelude::*, px, relative, size,
+    LayoutId, PaintQuad, Pixels, ShapedLine, SharedString, Subscription, Task, TextRun,
+    UTF16Selection, Window, fill, hsla, point, prelude::*, px, relative, size,
 };
 use unicode_segmentation::*;
 
+use crate::example_render_log::RenderLog;
 use crate::{Backspace, Delete, End, Home, Left, Right};
 
 pub struct ExampleEditor {
@@ -20,20 +21,42 @@ pub struct ExampleEditor {
     pub content: String,
     pub cursor: usize,
     pub cursor_visible: bool,
+    pub render_log: Option<Entity<RenderLog>>,
     _blink_task: Task<()>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl ExampleEditor {
-    pub fn new(cx: &mut Context<Self>) -> Self {
-        let blink_task = Self::spawn_blink_task(cx);
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus_handle = cx.focus_handle();
+
+        let focus_sub = cx.on_focus(&focus_handle, window, |this, _window, cx| {
+            this.start_blink(cx);
+        });
+        let blur_sub = cx.on_blur(&focus_handle, window, |this, _window, cx| {
+            this.stop_blink(cx);
+        });
 
         Self {
-            focus_handle: cx.focus_handle(),
+            focus_handle,
             content: String::new(),
             cursor: 0,
-            cursor_visible: true,
-            _blink_task: blink_task,
+            cursor_visible: false,
+            render_log: None,
+            _blink_task: Task::ready(()),
+            _subscriptions: vec![focus_sub, blur_sub],
         }
+    }
+
+    pub fn start_blink(&mut self, cx: &mut Context<Self>) {
+        self.cursor_visible = true;
+        self._blink_task = Self::spawn_blink_task(cx);
+    }
+
+    pub fn stop_blink(&mut self, cx: &mut Context<Self>) {
+        self.cursor_visible = false;
+        self._blink_task = Task::ready(());
+        cx.notify();
     }
 
     fn spawn_blink_task(cx: &mut Context<Self>) -> Task<()> {
@@ -450,6 +473,9 @@ impl gpui::EntityView for ExampleEditor {
         _window: &mut Window,
         cx: &mut Context<ExampleEditor>,
     ) -> impl IntoElement {
+        if let Some(render_log) = self.render_log.clone() {
+            render_log.update(cx, |log, _cx| log.log("ExampleEditor"));
+        }
         ExampleEditorText::new(cx.entity().clone())
     }
 }

@@ -10,19 +10,22 @@ use gpui::{
 };
 
 use crate::example_editor::ExampleEditor;
+use crate::example_render_log::RenderLog;
 use crate::{Backspace, Delete, End, Enter, Home, Left, Right};
 
 #[derive(Hash, IntoViewElement)]
 pub struct ExampleTextArea {
     editor: Entity<ExampleEditor>,
+    render_log: Entity<RenderLog>,
     rows: usize,
     color: Option<Hsla>,
 }
 
 impl ExampleTextArea {
-    pub fn new(editor: Entity<ExampleEditor>, rows: usize) -> Self {
+    pub fn new(editor: Entity<ExampleEditor>, render_log: Entity<RenderLog>, rows: usize) -> Self {
         Self {
             editor,
+            render_log,
             rows,
             color: None,
         }
@@ -36,6 +39,9 @@ impl ExampleTextArea {
 
 impl gpui::ComponentView for ExampleTextArea {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        self.render_log
+            .update(cx, |log, _cx| log.log("ExampleTextArea"));
+
         let focus_handle = self.editor.read(cx).focus_handle.clone();
         let is_focused = focus_handle.is_focused(window);
         let text_color = self.color.unwrap_or(hsla(0., 0., 0.1, 1.));

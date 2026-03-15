@@ -14,26 +14,29 @@ mod tests {
 
     use crate::example_editor::ExampleEditor;
     use crate::example_input::ExampleInput;
+    use crate::example_render_log::RenderLog;
     use crate::example_text_area::ExampleTextArea;
     use crate::{Backspace, Delete, End, Enter, Home, Left, Right};
 
     struct InputWrapper {
         editor: Entity<ExampleEditor>,
+        render_log: Entity<RenderLog>,
     }
 
     impl Render for InputWrapper {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-            ExampleInput::new(self.editor.clone())
+            ExampleInput::new(self.editor.clone(), self.render_log.clone())
         }
     }
 
     struct TextAreaWrapper {
         editor: Entity<ExampleEditor>,
+        render_log: Entity<RenderLog>,
     }
 
     impl Render for TextAreaWrapper {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-            ExampleTextArea::new(self.editor.clone(), 5)
+            ExampleTextArea::new(self.editor.clone(), self.render_log.clone(), 5)
         }
     }
 
@@ -56,9 +59,10 @@ mod tests {
     ) -> (Entity<ExampleEditor>, &mut gpui::VisualTestContext) {
         bind_keys(cx);
 
-        let (wrapper, cx) = cx.add_window_view(|_window, cx| {
-            let editor = cx.new(|cx| ExampleEditor::new(cx));
-            InputWrapper { editor }
+        let (wrapper, cx) = cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| ExampleEditor::new(window, cx));
+            let render_log = cx.new(|cx| RenderLog::new(cx));
+            InputWrapper { editor, render_log }
         });
 
         let editor = cx.read_entity(&wrapper, |wrapper, _cx| wrapper.editor.clone());
@@ -76,9 +80,10 @@ mod tests {
     ) -> (Entity<ExampleEditor>, &mut gpui::VisualTestContext) {
         bind_keys(cx);
 
-        let (wrapper, cx) = cx.add_window_view(|_window, cx| {
-            let editor = cx.new(|cx| ExampleEditor::new(cx));
-            TextAreaWrapper { editor }
+        let (wrapper, cx) = cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| ExampleEditor::new(window, cx));
+            let render_log = cx.new(|cx| RenderLog::new(cx));
+            TextAreaWrapper { editor, render_log }
         });
 
         let editor = cx.read_entity(&wrapper, |wrapper, _cx| wrapper.editor.clone());
