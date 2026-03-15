@@ -41,7 +41,7 @@ use gpui::{
 use gpui_platform::application;
 
 use example_editor::ExampleEditor;
-use example_input::ExampleInput;
+use example_input::{ExampleInput, ExampleInputState};
 use example_text_area::ExampleTextArea;
 
 actions!(
@@ -69,7 +69,7 @@ impl ViewExample {
 
 impl Render for ViewExample {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let input_editor = window.use_state(cx, |_window, cx| ExampleEditor::new(cx));
+        let input_state = window.use_state(cx, |window, cx| ExampleInputState::new(window, cx));
         let textarea_editor = window.use_state(cx, |_window, cx| ExampleEditor::new(cx));
         let input_color = self.input_color;
         let textarea_color = self.textarea_color;
@@ -87,13 +87,12 @@ impl Render for ViewExample {
                     .flex_col()
                     .gap(px(4.))
                     .child(
-                        div()
-                            .text_sm()
-                            .text_color(hsla(0., 0., 0.3, 1.))
-                            .child("Single-line input (Input — View with cached ExampleEditorText)"),
+                        div().text_sm().text_color(hsla(0., 0., 0.3, 1.)).child(
+                            "Single-line input (Input — View with own state + cached editor)",
+                        ),
                     )
                     .child(
-                        ExampleInput::new(input_editor)
+                        ExampleInput::new(input_state)
                             .width(px(320.))
                             .color(input_color),
                     ),
@@ -116,10 +115,12 @@ impl Render for ViewExample {
                     .mt(px(12.))
                     .text_xs()
                     .text_color(hsla(0., 0., 0.5, 1.))
-                    .child("• ExampleEditor entity owns state, blink task, EntityInputHandler")
-                    .child("• ExampleEditorText element shapes text, paints cursor, wires handle_input")
-                    .child("• Input / TextArea views compose ExampleEditorText with container styling")
-                    .child("• ViewElement::cached() enables render caching via #[derive(Hash)]")
+                    .child("• ExampleEditor entity owns text, cursor, blink (EntityView)")
+                    .child("• ExampleInput is a View with its own state — caches independently")
+                    .child(
+                        "• ExampleTextArea is a ComponentView — stateless wrapper, editor caches",
+                    )
+                    .child("• Press Enter in input to flash border (only chrome re-renders)")
                     .child("• Entities created via window.use_state()"),
             )
     }

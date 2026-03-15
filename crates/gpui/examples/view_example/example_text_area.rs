@@ -5,8 +5,8 @@
 //! components with different props and layouts.
 
 use gpui::{
-    App, BoxShadow, CursorStyle, Entity, Hsla, IntoViewElement, StyleRefinement, ViewElement,
-    Window, div, hsla, point, prelude::*, px, white,
+    App, BoxShadow, CursorStyle, Entity, Hsla, IntoViewElement, ViewElement, Window, div, hsla,
+    point, prelude::*, px, white,
 };
 
 use crate::example_editor::ExampleEditor;
@@ -34,22 +34,7 @@ impl ExampleTextArea {
     }
 }
 
-impl gpui::View for ExampleTextArea {
-    type Entity = ExampleEditor;
-
-    fn entity(&self) -> Option<Entity<ExampleEditor>> {
-        Some(self.editor.clone())
-    }
-
-    fn cache_style(&mut self, _window: &mut Window, _cx: &mut App) -> Option<StyleRefinement> {
-        let row_height = px(20.);
-        let box_height = row_height * self.rows as f32 + px(16.);
-        let mut style = StyleRefinement::default();
-        style.size.width = Some(px(400.).into());
-        style.size.height = Some(box_height.into());
-        Some(style)
-    }
-
+impl gpui::ComponentView for ExampleTextArea {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let focus_handle = self.editor.read(cx).focus_handle.clone();
         let is_focused = focus_handle.is_focused(window);

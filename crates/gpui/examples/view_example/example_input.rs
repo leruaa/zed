@@ -1,36 +1,64 @@
 //! The `ExampleInput` view — a single-line text input component.
 //!
 //! Composes `ExampleEditorText` inside a styled container with focus ring, border,
-//! and action handlers. Implements the `View` trait with `#[derive(Hash)]`
-//! so that prop changes (color, width) automatically invalidate the render
-//! cache via `ViewElement::cached()`.
+//! and action handlers. Implements the `View` trait backed by its own
+//! `ExampleInputState` entity, giving it an independent caching boundary
+//! from both its parent and the inner editor.
 
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt as _, App, BoxShadow, CursorStyle, Entity, Hsla, IntoViewElement,
-    Pixels, SharedString, StyleRefinement, ViewElement, Window, bounce, div, ease_in_out, hsla,
-    point, prelude::*, px, white,
+    Animation, AnimationExt as _, App, BoxShadow, Context, CursorStyle, Entity, FocusHandle, Hsla,
+    IntoViewElement, Pixels, SharedString, StyleRefinement, Subscription, ViewElement, Window,
+    bounce, div, ease_in_out, hsla, point, prelude::*, px, white,
 };
 
 use crate::example_editor::ExampleEditor;
 use crate::{Backspace, Delete, End, Enter, Home, Left, Right};
 
-struct FlashState {
-    count: usize,
+pub struct ExampleInputState {
+    editor: Entity<ExampleEditor>,
+    focus_handle: FocusHandle,
+    is_focused: bool,
+    flash_count: usize,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl ExampleInputState {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let editor = cx.new(|cx| ExampleEditor::new(cx));
+        let focus_handle = editor.read(cx).focus_handle.clone();
+
+        let focus_sub = cx.on_focus(&focus_handle, window, |this, _window, cx| {
+            this.is_focused = true;
+            cx.notify();
+        });
+        let blur_sub = cx.on_blur(&focus_handle, window, |this, _window, cx| {
+            this.is_focused = false;
+            cx.notify();
+        });
+
+        Self {
+            editor,
+            focus_handle,
+            is_focused: false,
+            flash_count: 0,
+            _subscriptions: vec![focus_sub, blur_sub],
+        }
+    }
 }
 
 #[derive(Hash, IntoViewElement)]
 pub struct ExampleInput {
-    editor: Entity<ExampleEditor>,
+    state: Entity<ExampleInputState>,
     width: Option<Pixels>,
     color: Option<Hsla>,
 }
 
 impl ExampleInput {
-    pub fn new(editor: Entity<ExampleEditor>) -> Self {
+    pub fn new(state: Entity<ExampleInputState>) -> Self {
         Self {
-            editor,
+            state,
             width: None,
             color: None,
         }
@@ -48,10 +76,10 @@ impl ExampleInput {
 }
 
 impl gpui::View for ExampleInput {
-    type Entity = ExampleEditor;
+    type Entity = ExampleInputState;
 
-    fn entity(&self) -> Option<Entity<ExampleEditor>> {
-        Some(self.editor.clone())
+    fn entity(&self) -> Option<Entity<ExampleInputState>> {
+        Some(self.state.clone())
     }
 
     fn cache_style(&mut self, _window: &mut Window, _cx: &mut App) -> Option<StyleRefinement> {
@@ -63,15 +91,15 @@ impl gpui::View for ExampleInput {
         Some(style)
     }
 
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let flash_state = window.use_state(cx, |_window, _cx| FlashState { count: 0 });
-        let count = flash_state.read(cx).count;
-
-        let focus_handle = self.editor.read(cx).focus_handle.clone();
-        let is_focused = focus_handle.is_focused(window);
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let input_state = self.state.read(cx);
+        let count = input_state.flash_count;
+        let editor = input_state.editor.clone();
+        let focus_handle = input_state.focus_handle.clone();
+        let is_focused = input_state.is_focused;
         let text_color = self.color.unwrap_or(hsla(0., 0., 0.1, 1.));
         let box_width = self.width.unwrap_or(px(300.));
-        let editor = self.editor;
+        let state = self.state;
 
         let focused_border = hsla(220. / 360., 0.8, 0.5, 1.);
         let unfocused_border = hsla(0., 0., 0.75, 1.);
@@ -124,10 +152,9 @@ impl gpui::View for ExampleInput {
                 }
             })
             .on_action({
-                let flash_state = flash_state;
                 move |_: &Enter, _window, cx| {
-                    flash_state.update(cx, |state, cx| {
-                        state.count += 1;
+                    state.update(cx, |state, cx| {
+                        state.flash_count += 1;
                         cx.notify();
                     });
                 }
