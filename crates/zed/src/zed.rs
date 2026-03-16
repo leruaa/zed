@@ -685,10 +685,10 @@ fn setup_or_teardown_ai_panels(
                     workspace.add_panel(sidebar_panel, window, cx);
                     match position {
                         workspace::dock::DockPosition::Left => {
-                            workspace.set_left_drawer(agent_drawer.into(), cx)
+                            workspace.set_left_drawer(agent_drawer, cx)
                         }
                         workspace::dock::DockPosition::Right => {
-                            workspace.set_right_drawer(agent_drawer.into(), cx)
+                            workspace.set_right_drawer(agent_drawer, cx)
                         }
                         workspace::dock::DockPosition::Bottom => {
                             unreachable!("drawers cannot go on the bottom")

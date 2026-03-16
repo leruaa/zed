@@ -7007,13 +7007,23 @@ impl Workspace {
         )
     }
 
-    pub fn set_left_drawer(&mut self, view: AnyView, cx: &mut Context<Self>) {
-        self.left_drawer = Some(Drawer::new(view));
+    pub fn set_left_drawer<V: Render + Focusable + 'static>(
+        &mut self,
+        view: Entity<V>,
+        cx: &mut Context<Self>,
+    ) {
+        let focus_handle = view.focus_handle(cx);
+        self.left_drawer = Some(Drawer::new(view.into(), focus_handle));
         cx.notify();
     }
 
-    pub fn set_right_drawer(&mut self, view: AnyView, cx: &mut Context<Self>) {
-        self.right_drawer = Some(Drawer::new(view));
+    pub fn set_right_drawer<V: Render + Focusable + 'static>(
+        &mut self,
+        view: Entity<V>,
+        cx: &mut Context<Self>,
+    ) {
+        let focus_handle = view.focus_handle(cx);
+        self.right_drawer = Some(Drawer::new(view.into(), focus_handle));
         cx.notify();
     }
 
@@ -7273,6 +7283,7 @@ impl Workspace {
         };
 
         let base = div()
+            .track_focus(&drawer.focus_handle)
             .flex()
             .flex_col()
             .overflow_hidden()
@@ -7910,14 +7921,16 @@ pub enum DrawerPosition {
 
 pub struct Drawer {
     view: AnyView,
+    focus_handle: FocusHandle,
     open: bool,
     custom_width: Option<Pixels>,
 }
 
 impl Drawer {
-    fn new(view: AnyView) -> Self {
+    fn new(view: AnyView, focus_handle: FocusHandle) -> Self {
         Self {
             view,
+            focus_handle,
             open: true,
             custom_width: None,
         }

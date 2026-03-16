@@ -3171,7 +3171,7 @@ mod tests {
         workspace.update_in(cx, |workspace, window, cx| {
             let text_thread_store = cx.new(|cx| TextThreadStore::fake(project.clone(), cx));
             let panel = cx.new(|cx| AgentPanel::test_new(workspace, text_thread_store, window, cx));
-            workspace.set_left_drawer(panel.clone().into(), cx);
+            workspace.set_left_drawer(panel.clone(), cx);
             panel
         })
     }

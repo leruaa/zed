@@ -65,9 +65,9 @@ use extension_host::ExtensionStore;
 use fs::Fs;
 use git::repository::validate_worktree_directory;
 use gpui::{
-    Action, Animation, AnimationExt, AnyElement, AnyView, App, AsyncWindowContext, ClipboardItem,
-    Corner, DismissEvent, Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable, KeyContext,
-    Pixels, Subscription, Task, UpdateGlobal, WeakEntity, prelude::*, pulsating_between,
+    Action, Animation, AnimationExt, AnyElement, App, AsyncWindowContext, ClipboardItem, Corner,
+    DismissEvent, Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable, KeyContext, Pixels,
+    Subscription, Task, UpdateGlobal, WeakEntity, prelude::*, pulsating_between,
 };
 use language::LanguageRegistry;
 use language_model::{ConfigurationError, LanguageModelRegistry};
@@ -423,19 +423,18 @@ pub fn init(cx: &mut App) {
                     let Some(panel) = workspace.drawer::<AgentPanel>() else {
                         return;
                     };
-                    let panel_view: AnyView = panel.into();
                     let dock_position = agent_panel_dock_position(cx);
                     match dock_position {
                         DockPosition::Right => {
                             if workspace.right_drawer_view().is_none() {
-                                workspace.set_right_drawer(panel_view, cx);
+                                workspace.set_right_drawer(panel, cx);
                             } else {
                                 workspace.toggle_drawer::<AgentPanel>(cx);
                             }
                         }
                         DockPosition::Left | DockPosition::Bottom => {
                             if workspace.left_drawer_view().is_none() {
-                                workspace.set_left_drawer(panel_view, cx);
+                                workspace.set_left_drawer(panel, cx);
                             } else {
                                 workspace.toggle_drawer::<AgentPanel>(cx);
                             }
@@ -5139,7 +5138,7 @@ mod tests {
             let text_thread_store = cx.new(|cx| TextThreadStore::fake(project.clone(), cx));
             let panel =
                 cx.new(|cx| AgentPanel::new(workspace, text_thread_store, None, window, cx));
-            workspace.set_left_drawer(panel.clone().into(), cx);
+            workspace.set_left_drawer(panel.clone(), cx);
         });
 
         cx.run_until_parked();
@@ -5651,7 +5650,7 @@ mod tests {
             let text_thread_store = cx.new(|cx| TextThreadStore::fake(project.clone(), cx));
             let panel =
                 cx.new(|cx| AgentPanel::new(workspace, text_thread_store, None, window, cx));
-            workspace.set_left_drawer(panel.clone().into(), cx);
+            workspace.set_left_drawer(panel.clone(), cx);
             panel
         });
 
@@ -5761,7 +5760,7 @@ mod tests {
             let text_thread_store = cx.new(|cx| TextThreadStore::fake(project.clone(), cx));
             let panel =
                 cx.new(|cx| AgentPanel::new(workspace, text_thread_store, None, window, cx));
-            workspace.set_left_drawer(panel.clone().into(), cx);
+            workspace.set_left_drawer(panel.clone(), cx);
             panel
         });
 
@@ -5846,7 +5845,7 @@ mod tests {
             let text_thread_store = cx.new(|cx| TextThreadStore::fake(project.clone(), cx));
             let panel =
                 cx.new(|cx| AgentPanel::new(workspace, text_thread_store, None, window, cx));
-            workspace.set_left_drawer(panel.clone().into(), cx);
+            workspace.set_left_drawer(panel.clone(), cx);
             workspace.focus_drawer::<AgentPanel>(window, cx);
             panel
         });
