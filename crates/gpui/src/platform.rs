@@ -508,6 +508,12 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     /// Inform the accesskit adapter of the bounds of the window.
     fn a11y_update_window_bounds(&self);
 
+    /// Whether the platform's accessibility adapter is currently active. Always
+    /// returns false on platforms that don't support accesskit.
+    fn is_a11y_active(&self) -> bool {
+        false
+    }
+
     // macOS specific methods
     fn get_title(&self) -> String {
         String::new()

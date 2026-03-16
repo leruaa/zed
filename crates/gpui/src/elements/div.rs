@@ -1968,10 +1968,12 @@ impl Interactivity {
 
         if let Some(focus_handle) = self.tracked_focus_handle.as_ref() {
             window.set_focus_handle(focus_handle, cx);
-            if let Some(global_id) = global_id {
-                window
-                    .a11y_focus_ids
-                    .insert(global_id.accesskit_node_id(), focus_handle.id);
+            if window.is_a11y_active() {
+                if let Some(global_id) = global_id {
+                    window
+                        .a11y_focus_ids
+                        .insert(global_id.accesskit_node_id(), focus_handle.id);
+                }
             }
         }
         window.with_optional_element_state::<InteractiveElementState, _>(
@@ -2465,12 +2467,14 @@ impl Interactivity {
         let aux_click_listeners = mem::take(&mut self.aux_click_listeners);
         let can_drop_predicate = mem::take(&mut self.can_drop_predicate);
 
-        if let Some(global_id) = global_id {
-            if !click_listeners.is_empty() {
-                let node_id = global_id.accesskit_node_id();
-                window
-                    .a11y_click_listeners
-                    .insert(node_id, click_listeners.clone());
+        if window.is_a11y_active() {
+            if let Some(global_id) = global_id {
+                if !click_listeners.is_empty() {
+                    let node_id = global_id.accesskit_node_id();
+                    window
+                        .a11y_click_listeners
+                        .insert(node_id, click_listeners.clone());
+                }
             }
         }
 

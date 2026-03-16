@@ -7,8 +7,9 @@ use gpui::{
     AnyWindowHandle, Bounds, Decorations, DevicePixels, ForegroundExecutor, GpuSpecs, Modifiers,
     Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow,
     Point, PromptButton, PromptLevel, RequestFrameOptions, ResizeEdge, ScaledPixels, Scene, Size,
-    Tiling, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControlArea,
-    WindowDecorations, WindowKind, WindowParams, px,
+    Tiling, TrivialActivationHandler, TrivialDeactivationHandler, WindowAppearance,
+    WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowDecorations, WindowKind,
+    WindowParams, px,
 };
 use gpui_wgpu::{CompositorGpuHint, WgpuRenderer, WgpuSurfaceConfig};
 
@@ -30,7 +31,16 @@ use x11rb::{
 };
 
 use std::{
-    cell::RefCell, ffi::c_void, fmt::Display, num::NonZeroU32, ptr::NonNull, rc::Rc, sync::Arc,
+    cell::RefCell,
+    ffi::c_void,
+    fmt::Display,
+    num::NonZeroU32,
+    ptr::NonNull,
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering::SeqCst},
+    },
 };
 
 use super::{X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES};
@@ -282,7 +292,7 @@ pub struct X11WindowState {
     edge_constraints: Option<EdgeConstraints>,
     pub handle: AnyWindowHandle,
     last_insets: [u32; 4],
-    // todo! document initialization reqs
+    a11y_active: Arc<AtomicBool>,
     accesskit: Option<accesskit_unix::Adapter>,
 }
 
@@ -755,6 +765,7 @@ impl X11WindowState {
                 edge_constraints: None,
                 counter_id: sync_request_counter,
                 last_sync_counter: None,
+                a11y_active: Arc::new(AtomicBool::new(false)),
                 accesskit: None,
             })
         });
@@ -1834,11 +1845,32 @@ impl PlatformWindow for X11Window {
             panic!("cannot initialize accesskit twice");
         }
 
+        let original_activation = callbacks.activation;
+        let activation = TrivialActivationHandler(Box::new({
+            let a11y_active = state.a11y_active.clone();
+            move || {
+                let tree = (original_activation.0)();
+                if tree.is_some() {
+                    a11y_active.store(true, SeqCst);
+                }
+                tree
+            }
+        }));
+
+        let original_deactivation = callbacks.deactivation;
+        let deactivation = TrivialDeactivationHandler(Box::new({
+            let a11y_active = state.a11y_active.clone();
+            move || {
+                a11y_active.store(false, SeqCst);
+                (original_deactivation.0)();
+            }
+        }));
+
         state.accesskit = Some(accesskit_unix::Adapter::new(
-            callbacks.activation,
+            activation,
             callbacks.action,
-            callbacks.deactivation,
-        ))
+            deactivation,
+        ));
     }
 
     fn a11y_tree_update(&mut self, tree_update: TreeUpdate) {
@@ -1849,6 +1881,10 @@ impl PlatformWindow for X11Window {
         };
 
         adapter.update_if_active(|| tree_update);
+    }
+
+    fn is_a11y_active(&self) -> bool {
+        self.0.state.borrow().a11y_active.load(SeqCst)
     }
 
     fn a11y_update_window_bounds(&self) {

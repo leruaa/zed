@@ -431,6 +431,9 @@ impl<E: Element> Drawable<E> {
     }
 
     fn push_a11y_node(&self, global_id: &GlobalElementId, window: &mut Window) -> bool {
+        if !window.is_a11y_active() {
+            return false;
+        }
         if let Some(role) = self.element.a11y_role() {
             let global_id = global_id.accesskit_node_id();
 

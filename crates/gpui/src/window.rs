@@ -2427,8 +2427,11 @@ impl Window {
     fn draw_roots(&mut self, cx: &mut App) {
         self.invalidator.set_phase(DrawPhase::Prepaint);
         self.tooltip_bounds.take();
-        self.a11y_click_listeners.clear();
-        self.a11y_focus_ids.clear();
+
+        if self.is_a11y_active() {
+            self.a11y_click_listeners.clear();
+            self.a11y_focus_ids.clear();
+        }
 
         let _inspector_width: Pixels = rems(30.0).to_pixels(self.rem_size());
         let root_size = {
@@ -2449,7 +2452,9 @@ impl Window {
         };
 
         // Layout all root elements.
-        self.a11y_nodes.push_root();
+        if self.is_a11y_active() {
+            self.a11y_nodes.push_root();
+        }
         let mut root_element = self.root.as_ref().unwrap().clone().into_any();
         root_element.prepaint_as_root(Point::default(), root_size.into(), self, cx);
 
@@ -2501,8 +2506,16 @@ impl Window {
         #[cfg(any(feature = "inspector", debug_assertions))]
         self.paint_inspector_hitbox(cx);
 
-        let tree_update = self.a11y_nodes.finalize();
-        self.platform_window.a11y_tree_update(tree_update);
+        if self.is_a11y_active() {
+            let tree_update = self.a11y_nodes.finalize();
+            self.platform_window.a11y_tree_update(tree_update);
+        }
+    }
+
+    /// Whether accessibility information is currently being requested by an
+    /// a11y tool. If false, we can skip building the a11y tree altogether.
+    pub fn is_a11y_active(&self) -> bool {
+        self.platform_window.is_a11y_active()
     }
 
     fn handle_a11y_action(&mut self, request: ActionRequest, cx: &mut App) {
@@ -3844,8 +3857,10 @@ impl Window {
         self.invalidator.debug_assert_prepaint();
         if focus_handle.is_focused(self) {
             self.next_frame.focus = Some(focus_handle.id);
-            if let Some(node_id) = self.a11y_nodes.current_node_id() {
-                self.a11y_nodes.set_focused(node_id);
+            if self.is_a11y_active() {
+                if let Some(node_id) = self.a11y_nodes.current_node_id() {
+                    self.a11y_nodes.set_focused(node_id);
+                }
             }
         }
         self.next_frame.dispatch_tree.set_focus_id(focus_handle.id);

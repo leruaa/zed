@@ -3,7 +3,10 @@ use std::{
     ffi::c_void,
     ptr::NonNull,
     rc::Rc,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering::SeqCst},
+    },
 };
 
 use accesskit::TreeUpdate;
@@ -34,7 +37,8 @@ use gpui::{
     AnyWindowHandle, Bounds, Capslock, Decorations, DevicePixels, GpuSpecs, Modifiers, Pixels,
     PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
     PromptButton, PromptLevel, RequestFrameOptions, ResizeEdge, Scene, Size, Tiling,
-    WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowControls,
+    TrivialActivationHandler, TrivialDeactivationHandler, WindowAppearance,
+    WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowControls,
     WindowDecorations, WindowKind, WindowParams, layer_shell::LayerShellNotSupportedError, px,
     size,
 };
@@ -120,7 +124,7 @@ pub struct WaylandWindowState {
     in_progress_window_controls: Option<WindowControls>,
     window_controls: WindowControls,
     client_inset: Option<Pixels>,
-    // todo! document initialization reqs
+    a11y_active: Arc<AtomicBool>,
     accesskit: Option<accesskit_unix::Adapter>,
 }
 
@@ -393,6 +397,7 @@ impl WaylandWindowState {
             in_progress_window_controls: None,
             window_controls: WindowControls::default(),
             client_inset: None,
+            a11y_active: Arc::new(AtomicBool::new(false)),
             accesskit: None,
         })
     }
@@ -1481,10 +1486,31 @@ impl PlatformWindow for WaylandWindow {
             panic!("cannot initialize accesskit twice");
         }
 
+        let original_activation = callbacks.activation;
+        let activation = TrivialActivationHandler(Box::new({
+            let a11y_active = state.a11y_active.clone();
+            move || {
+                let tree = (original_activation.0)();
+                if tree.is_some() {
+                    a11y_active.store(true, SeqCst);
+                }
+                tree
+            }
+        }));
+
+        let original_deactivation = callbacks.deactivation;
+        let deactivation = TrivialDeactivationHandler(Box::new({
+            let a11y_active = state.a11y_active.clone();
+            move || {
+                a11y_active.store(false, SeqCst);
+                (original_deactivation.0)();
+            }
+        }));
+
         state.accesskit = Some(accesskit_unix::Adapter::new(
-            callbacks.activation,
+            activation,
             callbacks.action,
-            callbacks.deactivation,
+            deactivation,
         ));
     }
 
@@ -1500,6 +1526,10 @@ impl PlatformWindow for WaylandWindow {
     
     fn a11y_update_window_bounds(&self) {
         // no-op - wayland does not let us get bounds for our window
+    }
+
+    fn is_a11y_active(&self) -> bool {
+        self.0.state.borrow().a11y_active.load(SeqCst)
     }
 }
 
