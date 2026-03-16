@@ -17,18 +17,18 @@ Each project appears as a collapsible group, with its threads listed underneath.
 
 ### Window Scoping {#window-scoping}
 
-The projects in the threads panel are scoped per window, just like everything else in Zed. Window maintains its own independent list of projects and threads.  If you have a set of threads running in one window, you can open additional windows with entirely different sets of threads and projects running in each of them.
+The projects in the Threads Panel are scoped per window, just like everything else in Zed. Each window maintains its own independent list of projects and threads.  If you have a set of threads running in one window, you can open additional windows with entirely different sets of threads and projects running in each of them.
 
-The controls work the same across all windows, and reference the same underlying list of threads — only the projects are local to the window you're looking at.
+Note that the threads are global, and tied to your filesystem, but the projects that organize the threads are local to the window you're looking at.
 
 Q: What about if I try to open the same folder in two different windows?
 A: If you have that project opened in a different window then we will focus that window for you. If you do not have a project opened in any window, then we'll open it in this window.
 
 Q: What happens if I open a new window?
-A: We will start you with an empty threads panel, ready for you to add projects to.
+A: We will start you with an empty Threads Panel, ready for you to add projects to.
 
-Q: What happens if I use the CLI, e.g. `zed .`?
-A: If you have a window with that project opened, that window will be focused. Otherwise, it will open in a new window with a single project in the threads panel.
+Q: What happens if I use the CLI, e.g. `zed my-project/`?
+A: If you have a window with that project opened, that window will be focused. Otherwise, it will open in a new window with a single project in the Threads Panel.
 
 ### Adding Projects {#adding-projects}
 
@@ -36,19 +36,19 @@ To add a new project to the Threads Panel, open a folder the way you normally wo
 
 ### Removing Projects {#removing-projects}
 
-To remove a project from the Threads Panel, click the close button on its header. This removes the project from the panel's list but will not archive or delete the threads associated with that project.
+To remove a project from the Threads Panel, click the close button on its header. This removes the project from the panel's list but will not archive or delete the threads associated with that project. If you want to see those threads, you can re-open the project.
 
 Q: What happens if I remove all of the projects in my window, while I have a project open?
 A: You cannot remove the currently open project. However, if you do not have any projects open in the window, then we will show the empty state.
 
 ----SIDE THOUGHT: If the opened state is so important, can we show it in the sidebar somehow?-----
 
-Q: What happens if I have a running thread and remove it's project from my window?
+Q: What happens if I have a running thread and remove its project from my window?
 A: That thread will stop running.
 
 ### Multi-Folder Projects {#multi-folder-projects}
 
-When you add or remove folders from your current project, the Threads Panel updates to reflect the change. The new set of folders is added as a new project to the thread panel so that you can maintain any threads running in your project when you add the folder.
+When you add or remove folders from your current project, the Threads Panel updates to reflect the change. The new set of folders is added as a new project to the Threads Panel so that you can maintain any threads running in your project when you add the folder.
 
 ## Worktrees {#worktrees}
 
@@ -56,16 +56,16 @@ The Zed agent supports automatic work tree initialization across all agents. Whe
 
 For each thread started via this new worktree option, a corresponding thread entry is inserted underneath that project in the Threads Panel, with a chip indicating the worktree used. This lets you run isolated agent sessions on separate worktrees without them interfering with each other's work.
 
-Worktrees without threads, will not show up in the Threads Panel, only their original repository will be shown.
+Worktrees without threads will not show up in the Threads Panel, only their original repository will be shown.
 
-Q: What about worktrees made outside of Zed? How do I get them in to the threads panel?
-A: Simple open each folder, like you would any other folder, and then click the agent panel and start typing. The new thread with the worktree chip will appear automatically in the threads panel once you submit your prompt.
+Q: What about worktrees made outside of Zed? How do I get them into the Threads Panel?
+A: Simply open each folder, like you would any other folder, and then click the agent panel and start typing. The new thread with the worktree chip will appear automatically in the Threads Panel once you submit your prompt.
 
 Q: What about if I want a thread across multiple different worktrees of the same set of projects? (e.g. `zed/worktree-1` and `cloud/externally-created-worktree`)
-A: Open the projects like you would in Zed normally (cmd-o to select the folder, then add folder to root project), and then start a new thread via the agent panel. The new worktree thread will appear automatically in the threads panel, with multiple worktree chips for each configured worktree.
+A: Open the projects like you would in Zed normally (cmd-o to select the folder, then add folder to root project), and then start a new thread via the agent panel. The new worktree thread will appear automatically in the Threads Panel, with multiple worktree chips for each configured worktree.
 
-Q: How do I open each worktree in a seperate window?
-A: Open a window and select the folders for those worktrees,
+Q: How do I open each worktree in a separate window?
+A: Open a window and select the folders for those worktrees.
 
 ----SIDE THOUGHT: This feels like a clunky answer, perhaps we want a smoother way of doing this?-----
 
