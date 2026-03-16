@@ -2814,20 +2814,22 @@ impl AgentPanel {
             .worktree_directory
             .clone();
 
-        let (dock_structure, open_file_paths) = self
-            .workspace
-            .upgrade()
-            .map(|workspace| {
-                let dock_structure = workspace.read(cx).capture_dock_state(window, cx);
-                let open_file_paths = workspace.read(cx).open_item_abs_paths(cx);
-                (dock_structure, open_file_paths)
-            })
-            .unwrap_or_default();
+        let active_file_path = self.workspace.upgrade().and_then(|workspace| {
+            let workspace = workspace.read(cx);
+            let active_item = workspace.active_item(cx)?;
+            let project_path = active_item.project_path(cx)?;
+            workspace
+                .project()
+                .read(cx)
+                .absolute_path(&project_path, cx)
+        });
 
         let workspace = self.workspace.clone();
         let window_handle = window
             .window_handle()
             .downcast::<workspace::MultiWorkspace>();
+
+        let selected_agent = self.selected_agent();
 
         let task = cx.spawn_in(window, async move |this, cx| {
             // Await the branch listings we kicked off earlier.
@@ -2922,12 +2924,12 @@ impl AgentPanel {
                 all_paths,
                 app_state,
                 window_handle,
-                dock_structure,
-                open_file_paths,
+                active_file_path,
                 path_remapping,
                 non_git_paths,
                 has_non_git,
                 content,
+                selected_agent,
                 cx,
             )
             .await
@@ -2955,27 +2957,21 @@ impl AgentPanel {
         all_paths: Vec<PathBuf>,
         app_state: Arc<workspace::AppState>,
         window_handle: Option<gpui::WindowHandle<workspace::MultiWorkspace>>,
-        dock_structure: workspace::DockStructure,
-        open_file_paths: Vec<PathBuf>,
+        active_file_path: Option<PathBuf>,
         path_remapping: Vec<(PathBuf, PathBuf)>,
         non_git_paths: Vec<PathBuf>,
         has_non_git: bool,
         content: Vec<acp::ContentBlock>,
+        selected_agent: Option<Agent>,
         cx: &mut AsyncWindowContext,
     ) -> Result<()> {
-        let init: Option<
-            Box<dyn FnOnce(&mut Workspace, &mut Window, &mut gpui::Context<Workspace>) + Send>,
-        > = Some(Box::new(move |workspace, window, cx| {
-            workspace.set_dock_structure(dock_structure, window, cx);
-        }));
-
         let OpenResult {
             window: new_window_handle,
             workspace: new_workspace,
             ..
         } = cx
             .update(|_window, cx| {
-                Workspace::new_local(all_paths, app_state, window_handle, None, init, false, cx)
+                Workspace::new_local(all_paths, app_state, window_handle, None, None, false, cx)
             })?
             .await?;
 
@@ -3005,48 +3001,71 @@ impl AgentPanel {
                     );
                 }
 
-                let remapped_paths: Vec<PathBuf> = open_file_paths
-                    .iter()
-                    .filter_map(|original_path| {
-                        let best_match = path_remapping
-                            .iter()
-                            .filter_map(|(old_root, new_root)| {
-                                original_path.strip_prefix(old_root).ok().map(|relative| {
-                                    (old_root.components().count(), new_root.join(relative))
-                                })
+                // If we had an active buffer, remap its path and reopen it.
+                let should_zoom_agent_panel = active_file_path.is_none();
+
+                let remapped_active_path = active_file_path.and_then(|original_path| {
+                    let best_match = path_remapping
+                        .iter()
+                        .filter_map(|(old_root, new_root)| {
+                            original_path.strip_prefix(old_root).ok().map(|relative| {
+                                (old_root.components().count(), new_root.join(relative))
                             })
-                            .max_by_key(|(depth, _)| *depth);
+                        })
+                        .max_by_key(|(depth, _)| *depth);
 
-                        if let Some((_, remapped_path)) = best_match {
-                            return Some(remapped_path);
-                        }
+                    if let Some((_, remapped_path)) = best_match {
+                        return Some(remapped_path);
+                    }
 
-                        for non_git in &non_git_paths {
-                            if original_path.starts_with(non_git) {
-                                return Some(original_path.clone());
-                            }
+                    for non_git in &non_git_paths {
+                        if original_path.starts_with(non_git) {
+                            return Some(original_path);
                         }
-                        None
+                    }
+                    None
+                });
+
+                if !should_zoom_agent_panel && remapped_active_path.is_none() {
+                    log::warn!(
+                        "Active file could not be remapped to the new worktree; it will not be reopened"
+                    );
+                }
+
+                if let Some(path) = remapped_active_path {
+                    let open_task = workspace.open_paths(
+                        vec![path],
+                        workspace::OpenOptions::default(),
+                        None,
+                        window,
+                        cx,
+                    );
+                    cx.spawn(async move |_, _| -> anyhow::Result<()> {
+                        for item in open_task.await.into_iter().flatten() {
+                            item?;
+                        }
+                        Ok(())
                     })
-                    .collect();
-
-                if !remapped_paths.is_empty() {
-                    workspace
-                        .open_paths(
-                            remapped_paths,
-                            workspace::OpenOptions::default(),
-                            None,
-                            window,
-                            cx,
-                        )
-                        .detach();
+                    .detach_and_log_err(cx);
                 }
 
                 workspace.focus_drawer::<AgentPanel>(window, cx);
+
+                // If no active buffer was open, zoom the agent panel
+                // (equivalent to cmd-esc fullscreen behavior).
+                // This must happen after focus_drawer, which activates
+                // and opens the panel in the drawer.
+                if should_zoom_agent_panel {
+                    if let Some(panel) = workspace.drawer::<AgentPanel>() {
+                        panel.update(cx, |_panel, cx| {
+                            cx.emit(PanelEvent::ZoomIn);
+                        });
+                    }
+                }
                 if let Some(panel) = workspace.drawer::<AgentPanel>() {
                     panel.update(cx, |panel, cx| {
                         panel.external_thread(
-                            None,
+                            selected_agent,
                             None,
                             None,
                             None,
@@ -5959,6 +5978,160 @@ mod tests {
             AgentType::Custom {
                 id: "my-agent".into(),
             },
+        );
+    }
+
+    #[gpui::test]
+    async fn test_worktree_creation_preserves_selected_agent(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let app_state = cx.update(|cx| {
+            cx.update_flags(true, vec!["agent-v2".to_string()]);
+            agent::ThreadStore::init_global(cx);
+            language_model::LanguageModelRegistry::test(cx);
+
+            let app_state = workspace::AppState::test(cx);
+            workspace::init(app_state.clone(), cx);
+            app_state
+        });
+
+        let fs = app_state.fs.as_fake();
+        fs.insert_tree(
+            "/project",
+            json!({
+                ".git": {},
+                "src": {
+                    "main.rs": "fn main() {}"
+                }
+            }),
+        )
+        .await;
+        fs.set_branch_name(Path::new("/project/.git"), Some("main"));
+
+        let project = Project::test(app_state.fs.clone(), [Path::new("/project")], cx).await;
+
+        let multi_workspace =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+
+        let workspace = multi_workspace
+            .read_with(cx, |multi_workspace, _cx| {
+                multi_workspace.workspace().clone()
+            })
+            .unwrap();
+
+        workspace.update(cx, |workspace, _cx| {
+            workspace.set_random_database_id();
+        });
+
+        // Register a callback so new workspaces also get an AgentPanel.
+        cx.update(|cx| {
+            cx.observe_new(
+                |workspace: &mut Workspace,
+                 window: Option<&mut Window>,
+                 cx: &mut Context<Workspace>| {
+                    if let Some(window) = window {
+                        let project = workspace.project().clone();
+                        let text_thread_store =
+                            cx.new(|cx| TextThreadStore::fake(project.clone(), cx));
+                        let panel = cx.new(|cx| {
+                            AgentPanel::new(workspace, text_thread_store, None, window, cx)
+                        });
+                        workspace.add_panel(panel, window, cx);
+                    }
+                },
+            )
+            .detach();
+        });
+
+        let cx = &mut VisualTestContext::from_window(multi_workspace.into(), cx);
+
+        // Wait for the project to discover the git repository.
+        cx.run_until_parked();
+
+        let panel = workspace.update_in(cx, |workspace, window, cx| {
+            let text_thread_store = cx.new(|cx| TextThreadStore::fake(project.clone(), cx));
+            let panel =
+                cx.new(|cx| AgentPanel::new(workspace, text_thread_store, None, window, cx));
+            workspace.add_panel(panel.clone(), window, cx);
+            panel
+        });
+
+        cx.run_until_parked();
+
+        // Open a thread (needed so there's an active thread view).
+        panel.update_in(cx, |panel, window, cx| {
+            panel.open_external_thread_with_server(
+                Rc::new(StubAgentServer::default_response()),
+                window,
+                cx,
+            );
+        });
+
+        cx.run_until_parked();
+
+        // Set the selected agent to Codex (a custom agent) and start_thread_in
+        // to NewWorktree. We do this AFTER opening the thread because
+        // open_external_thread_with_server overrides selected_agent_type.
+        panel.update(cx, |panel, cx| {
+            panel.selected_agent_type = AgentType::Custom {
+                name: CODEX_NAME.into(),
+            };
+            panel.set_start_thread_in(&StartThreadIn::NewWorktree, cx);
+        });
+
+        // Verify the panel has the Codex agent selected.
+        panel.read_with(cx, |panel, _cx| {
+            assert_eq!(
+                panel.selected_agent_type,
+                AgentType::Custom {
+                    name: CODEX_NAME.into()
+                },
+            );
+        });
+
+        // Directly call handle_worktree_creation_requested, which is what
+        // handle_first_send_requested does when start_thread_in == NewWorktree.
+        let content = vec![acp::ContentBlock::Text(acp::TextContent::new(
+            "Hello from test",
+        ))];
+        panel.update_in(cx, |panel, window, cx| {
+            panel.handle_worktree_creation_requested(content, window, cx);
+        });
+
+        // Let the async worktree creation + workspace setup complete.
+        cx.run_until_parked();
+
+        // Find the new workspace's AgentPanel and verify it used the Codex agent.
+        let found_codex = multi_workspace
+            .read_with(cx, |multi_workspace, cx| {
+                // There should be more than one workspace now (the original + the new worktree).
+                assert!(
+                    multi_workspace.workspaces().len() > 1,
+                    "expected a new workspace to have been created, found {}",
+                    multi_workspace.workspaces().len(),
+                );
+
+                // Check the newest workspace's panel for the correct agent.
+                let new_workspace = multi_workspace
+                    .workspaces()
+                    .iter()
+                    .find(|ws| ws.entity_id() != workspace.entity_id())
+                    .expect("should find the new workspace");
+                let new_panel = new_workspace
+                    .read(cx)
+                    .panel::<AgentPanel>(cx)
+                    .expect("new workspace should have an AgentPanel");
+
+                new_panel.read(cx).selected_agent_type.clone()
+            })
+            .unwrap();
+
+        assert_eq!(
+            found_codex,
+            AgentType::Custom {
+                name: CODEX_NAME.into()
+            },
+            "the new worktree workspace should use the same agent (Codex) that was selected in the original panel",
         );
     }
 
