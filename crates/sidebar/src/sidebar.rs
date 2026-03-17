@@ -567,6 +567,13 @@ impl Sidebar {
             if should_load_threads {
                 let mut seen_session_ids: HashSet<acp::SessionId> = HashSet::new();
 
+                // Get the current branch name from the workspace's root repository.
+                let workspace_branch_name: Option<SharedString> =
+                    root_repository_snapshots(workspace, cx)
+                        .first()
+                        .and_then(|snapshot| snapshot.branch.as_ref())
+                        .map(|branch| SharedString::from(branch.name().to_string()));
+
                 // Read threads from SidebarDb for this workspace's path list.
                 if let Some(rows) = threads_by_paths.get(&path_list) {
                     for row in rows {
@@ -602,7 +609,7 @@ impl Sidebar {
                             is_background: false,
                             is_title_generating: false,
                             highlight_positions: Vec::new(),
-                            worktree_name: None,
+                            worktree_name: workspace_branch_name.clone(),
                             worktree_path: None,
                             worktree_highlight_positions: Vec::new(),
                             diff_stats: DiffStats::default(),

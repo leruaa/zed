@@ -346,15 +346,17 @@ impl RenderOnce for ThreadItem {
                         .min_w_0()
                         .gap_1p5()
                         .child(icon_container()) // Icon Spacing
-                        .when(worktree_path.is_some(), |this| {
-                            this.child(
-                                div().child(
-                                    Icon::new(IconName::GitBranch)
-                                        .size(IconSize::XSmall)
-                                        .color(Color::Muted),
-                                ),
-                            )
-                        })
+                        .child(
+                            div().child(
+                                Icon::new(if worktree_path.is_some() {
+                                    IconName::GitBranch
+                                } else {
+                                    IconName::GitBranchAlt
+                                })
+                                .size(IconSize::XSmall)
+                                .color(Color::Muted),
+                            ),
+                        )
                         .child(worktree_label)
                         .when(has_diff_stats || has_timestamp, |this| {
                             this.child(dot_separator())
