@@ -152,7 +152,7 @@ pub struct PathContextCondition<'a> {
 }
 
 impl<'a> PathContextCondition<'a> {
-    pub fn guard(&'a self, job: NamedJob) -> NamedJob {
+    pub fn then(&'a self, job: NamedJob) -> NamedJob {
         let set_by_step = self
             .condition
             .set_by_step

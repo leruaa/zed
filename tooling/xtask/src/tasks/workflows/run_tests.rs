@@ -50,40 +50,38 @@ pub(crate) fn run_tests() -> Workflow {
         check_style(),
         should_run_tests
             .and_not_in_merge_queue()
-            .guard(clippy(Platform::Windows, None)),
+            .then(clippy(Platform::Windows, None)),
         should_run_tests
             .and_always()
-            .guard(clippy(Platform::Linux, None)),
+            .then(clippy(Platform::Linux, None)),
         should_run_tests
             .and_not_in_merge_queue()
-            .guard(clippy(Platform::Mac, None)),
+            .then(clippy(Platform::Mac, None)),
         should_run_tests
             .and_not_in_merge_queue()
-            .guard(clippy(Platform::Mac, Some(Arch::X86_64))),
+            .then(clippy(Platform::Mac, Some(Arch::X86_64))),
         should_run_tests
             .and_not_in_merge_queue()
-            .guard(run_platform_tests(Platform::Windows)),
+            .then(run_platform_tests(Platform::Windows)),
         should_run_tests
             .and_not_in_merge_queue()
-            .guard(run_platform_tests(Platform::Linux)),
+            .then(run_platform_tests(Platform::Linux)),
         should_run_tests
             .and_not_in_merge_queue()
-            .guard(run_platform_tests(Platform::Mac)),
-        should_run_tests.and_not_in_merge_queue().guard(doctests()),
+            .then(run_platform_tests(Platform::Mac)),
+        should_run_tests.and_not_in_merge_queue().then(doctests()),
         should_run_tests
             .and_not_in_merge_queue()
-            .guard(check_workspace_binaries()),
+            .then(check_workspace_binaries()),
+        should_run_tests.and_not_in_merge_queue().then(check_wasm()),
         should_run_tests
             .and_not_in_merge_queue()
-            .guard(check_wasm()),
-        should_run_tests
-            .and_not_in_merge_queue()
-            .guard(check_dependencies()), // could be more specific here?
-        should_check_docs.and_always().guard(check_docs()),
+            .then(check_dependencies()), // could be more specific here?
+        should_check_docs.and_always().then(check_docs()),
         should_check_licences
             .and_not_in_merge_queue()
-            .guard(check_licenses()),
-        should_check_scripts.and_always().guard(check_scripts()),
+            .then(check_licenses()),
+        should_check_scripts.and_always().then(check_scripts()),
     ];
     let ext_tests = extension_tests();
     let tests_pass = tests_pass(&jobs, &[&ext_tests.name]);
@@ -92,7 +90,7 @@ pub(crate) fn run_tests() -> Workflow {
     jobs.push(
         should_run_tests
             .and_always()
-            .guard(check_postgres_and_protobuf_migrations()),
+            .then(check_postgres_and_protobuf_migrations()),
     ); // could be more specific here?
 
     named::workflow()
