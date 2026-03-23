@@ -638,9 +638,14 @@ impl MultiWorkspace {
         })
     }
 
-    pub fn remove_workspace(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn remove_workspace(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<Workspace>> {
         if self.workspaces.len() <= 1 || index >= self.workspaces.len() {
-            return;
+            return None;
         }
 
         let removed_workspace = self.workspaces.remove(index);
@@ -671,6 +676,8 @@ impl MultiWorkspace {
         ));
         cx.emit(MultiWorkspaceEvent::ActiveWorkspaceChanged);
         cx.notify();
+
+        Some(removed_workspace)
     }
 
     pub fn move_workspace_to_new_window(
@@ -683,44 +690,25 @@ impl MultiWorkspace {
             return;
         }
 
-        let is_active = index == self.active_workspace_index;
-        let workspace = &self.workspaces[index];
-        let paths: Vec<PathBuf> = workspace
-            .read(cx)
-            .worktrees(cx)
-            .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
-            .collect();
+        let Some(workspace) = self.remove_workspace(index, window, cx) else {
+            return;
+        };
+
         let app_state: Arc<crate::AppState> = workspace.read(cx).app_state().clone();
 
-        self.remove_workspace(index, window, cx);
+        cx.defer(move |cx| {
+            let options = (app_state.build_window_options)(None, cx);
 
-        let open_task = cx.spawn(async move |_, cx| {
-            let open_result = cx
-                .update(|cx| {
-                    crate::open_paths(
-                        &paths,
-                        app_state,
-                        crate::OpenOptions {
-                            open_new_workspace: Some(true),
-                            ..Default::default()
-                        },
-                        cx,
-                    )
-                })
-                .await?;
+            let Ok(window) = cx.open_window(options, |window, cx| {
+                cx.new(|cx| MultiWorkspace::new(workspace, window, cx))
+            }) else {
+                return;
+            };
 
-            if is_active {
-                open_result
-                    .window
-                    .update(cx, |_, window, _cx| {
-                        window.activate_window();
-                    })
-                    .log_err();
-            }
-
-            anyhow::Ok(())
+            let _ = window.update(cx, |_, window, _| {
+                window.activate_window();
+            });
         });
-        open_task.detach_and_log_err(cx);
     }
 
     fn move_active_workspace_to_new_window(
