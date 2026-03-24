@@ -17,7 +17,7 @@ use agent_ui::{AgentDiffToolbar, AgentPanelDelegate};
 use anyhow::Context as _;
 pub use app_menus::*;
 use assets::Assets;
-use audio::{AudioSettings, REPLAY_DURATION};
+
 use breadcrumbs::Breadcrumbs;
 use client::zed_urls;
 use collections::VecDeque;
@@ -69,7 +69,7 @@ use settings::{
     update_settings_file,
 };
 use sidebar::Sidebar;
-use std::time::Duration;
+
 use std::{
     borrow::Cow,
     path::{Path, PathBuf},
@@ -84,9 +84,7 @@ use util::rel_path::RelPath;
 use util::{ResultExt, asset_str, maybe};
 use uuid::Uuid;
 use vim_mode_setting::VimModeSetting;
-use workspace::notifications::{
-    NotificationId, SuppressEvent, dismiss_app_notification, show_app_notification,
-};
+use workspace::notifications::{NotificationId, dismiss_app_notification, show_app_notification};
 
 use workspace::{
     AppState, MultiWorkspace, NewFile, NewWindow, OpenLog, Panel, Toast, Workspace,
@@ -94,8 +92,7 @@ use workspace::{
     notifications::simple_message_notification::MessageNotification, open_new,
 };
 use workspace::{
-    CloseIntent, CloseProject, CloseWindow, NotificationFrame, RestoreBanner,
-    with_active_or_new_workspace,
+    CloseIntent, CloseProject, CloseWindow, RestoreBanner, with_active_or_new_workspace,
 };
 use workspace::{Pane, notifications::DetachAndPromptErr};
 use zed_actions::{
@@ -144,10 +141,6 @@ actions!(
 actions!(
     dev,
     [
-        /// Stores last 30s of audio from zed staff using the experimental rodio
-        /// audio system (including yourself) on the current call in a tar file
-        /// in the current working directory.
-        CaptureRecentAudio,
         /// Opens a prompt to enter a URL to open.
         OpenUrlPrompt,
     ]
@@ -163,21 +156,24 @@ pub fn init(cx: &mut App) {
     cx.on_action(quit);
 
     cx.on_action(|_: &RestoreBanner, cx| title_bar::restore_banner(cx));
-    let flag = cx.wait_for_flag::<PanicFeatureFlag>();
-    cx.spawn(async |cx| {
-        if cx.update(|cx| ReleaseChannel::global(cx) == ReleaseChannel::Dev) || flag.await {
-            cx.update(|cx| {
-                cx.on_action(|_: &TestPanic, _| panic!("Ran the TestPanic action"))
-                    .on_action(|_: &TestCrash, _| {
-                        unsafe extern "C" {
-                            fn puts(s: *const i8);
-                        }
-                        unsafe {
-                            puts(0xabad1d3a as *const i8);
-                        }
-                    });
-            });
-        };
+
+    cx.observe_flag::<PanicFeatureFlag, _>({
+        let mut added = false;
+        move |enabled, cx| {
+            if added || !enabled {
+                return;
+            }
+            added = true;
+            cx.on_action(|_: &TestPanic, _| panic!("Ran the TestPanic action"))
+                .on_action(|_: &TestCrash, _| {
+                    unsafe extern "C" {
+                        fn puts(s: *const i8);
+                    }
+                    unsafe {
+                        puts(0xabad1d3a as *const i8);
+                    }
+                });
+        }
     })
     .detach();
     cx.on_action(|_: &OpenLog, cx| {
@@ -395,7 +391,7 @@ pub fn initialize_workspace(
                     let sidebar =
                         cx.new(|cx| Sidebar::new(multi_workspace_handle.clone(), window, cx));
                     multi_workspace_handle.update(cx, |multi_workspace, cx| {
-                        multi_workspace.register_sidebar(sidebar, window, cx);
+                        multi_workspace.register_sidebar(sidebar, cx);
                     });
                 })
                 .ok();
@@ -1078,37 +1074,54 @@ fn register_actions(
         })
         .register_action({
             let app_state = Arc::downgrade(&app_state);
-            move |_, _: &CloseProject, window, cx| {
+            move |_workspace, _: &CloseProject, window, cx| {
                 let Some(window_handle) = window.window_handle().downcast::<MultiWorkspace>() else {
                     return;
                 };
                 if let Some(app_state) = app_state.upgrade() {
-                    open_new(
-                        workspace::OpenOptions {
-                            replace_window: Some(window_handle),
-                            ..Default::default()
-                        },
-                        app_state,
-                        cx,
-                        |workspace, window, cx| {
-                            cx.activate(true);
-                            // Create buffer synchronously to avoid flicker
-                            let project = workspace.project().clone();
-                            let buffer = project.update(cx, |project, cx| {
-                                project.create_local_buffer("", None, true, cx)
-                            });
-                            let editor = cx.new(|cx| {
-                                Editor::for_buffer(buffer, Some(project), window, cx)
-                            });
-                            workspace.add_item_to_active_pane(
-                                Box::new(editor),
-                                None,
-                                true,
-                                window,
-                                cx,
-                            );
-                        },
-                    )
+                    cx.spawn_in(window, async move |this, cx| {
+                        let should_continue = this
+                            .update_in(cx, |workspace, window, cx| {
+                                workspace.prepare_to_close(
+                                    CloseIntent::ReplaceWindow,
+                                    window,
+                                    cx,
+                                )
+                            })?
+                            .await?;
+                        if should_continue {
+                            let task = cx.update(|_window, cx| {
+                                open_new(
+                                    workspace::OpenOptions {
+                                        replace_window: Some(window_handle),
+                                        ..Default::default()
+                                    },
+                                    app_state,
+                                    cx,
+                                    |workspace, window, cx| {
+                                        cx.activate(true);
+                                        let project = workspace.project().clone();
+                                        let buffer = project.update(cx, |project, cx| {
+                                            project.create_local_buffer("", None, true, cx)
+                                        });
+                                        let editor = cx.new(|cx| {
+                                            Editor::for_buffer(buffer, Some(project), window, cx)
+                                        });
+                                        workspace.add_item_to_active_pane(
+                                            Box::new(editor),
+                                            None,
+                                            true,
+                                            window,
+                                            cx,
+                                        );
+                                    },
+                                )
+                            })?;
+                            task.await
+                        } else {
+                            Ok(())
+                        }
+                    })
                     .detach_and_log_err(cx);
                 }
             }
@@ -1128,9 +1141,6 @@ fn register_actions(
                     .detach_and_log_err(cx);
                 }
             }
-        })
-        .register_action(|workspace, _: &CaptureRecentAudio, window, cx| {
-            capture_recent_audio(workspace, window, cx);
         });
 
     #[cfg(not(target_os = "windows"))]
@@ -2121,84 +2131,6 @@ fn open_settings_file(
     .detach_and_log_err(cx);
 }
 
-fn capture_recent_audio(workspace: &mut Workspace, _: &mut Window, cx: &mut Context<Workspace>) {
-    struct CaptureRecentAudioNotification {
-        focus_handle: gpui::FocusHandle,
-        save_result: Option<Result<(PathBuf, Duration), anyhow::Error>>,
-        _save_task: Task<anyhow::Result<()>>,
-    }
-
-    impl gpui::EventEmitter<DismissEvent> for CaptureRecentAudioNotification {}
-    impl gpui::EventEmitter<SuppressEvent> for CaptureRecentAudioNotification {}
-    impl gpui::Focusable for CaptureRecentAudioNotification {
-        fn focus_handle(&self, _cx: &App) -> gpui::FocusHandle {
-            self.focus_handle.clone()
-        }
-    }
-    impl workspace::notifications::Notification for CaptureRecentAudioNotification {}
-
-    impl Render for CaptureRecentAudioNotification {
-        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            let message = match &self.save_result {
-                None => format!(
-                    "Saving up to {} seconds of recent audio",
-                    REPLAY_DURATION.as_secs(),
-                ),
-                Some(Ok((path, duration))) => format!(
-                    "Saved {} seconds of all audio to {}",
-                    duration.as_secs(),
-                    path.display(),
-                ),
-                Some(Err(e)) => format!("Error saving audio replays: {e:?}"),
-            };
-
-            NotificationFrame::new()
-                .with_title(Some("Saved Audio"))
-                .show_suppress_button(false)
-                .on_close(cx.listener(|_, _, _, cx| {
-                    cx.emit(DismissEvent);
-                }))
-                .with_content(message)
-        }
-    }
-
-    impl CaptureRecentAudioNotification {
-        fn new(cx: &mut Context<Self>) -> Self {
-            if AudioSettings::get_global(cx).rodio_audio {
-                let executor = cx.background_executor().clone();
-                let save_task = cx.default_global::<audio::Audio>().save_replays(executor);
-                let _save_task = cx.spawn(async move |this, cx| {
-                    let res = save_task.await;
-                    this.update(cx, |this, cx| {
-                        this.save_result = Some(res);
-                        cx.notify();
-                    })
-                });
-
-                Self {
-                    focus_handle: cx.focus_handle(),
-                    _save_task,
-                    save_result: None,
-                }
-            } else {
-                Self {
-                    focus_handle: cx.focus_handle(),
-                    _save_task: Task::ready(Ok(())),
-                    save_result: Some(Err(anyhow::anyhow!(
-                        "Capturing recent audio is only supported on the experimental rodio audio pipeline"
-                    ))),
-                }
-            }
-        }
-    }
-
-    workspace.show_notification(
-        NotificationId::unique::<CaptureRecentAudioNotification>(),
-        cx,
-        |cx| cx.new(CaptureRecentAudioNotification::new),
-    );
-}
-
 /// Eagerly loads the active theme and icon theme based on the selections in the
 /// theme settings.
 ///
@@ -2441,7 +2373,7 @@ mod tests {
             .update(cx, |multi_workspace, window, cx| {
                 multi_workspace.workspace().update(cx, |workspace, cx| {
                     assert_eq!(workspace.worktrees(cx).count(), 2);
-                    assert!(workspace.left_dock().read(cx).is_open());
+                    assert!(workspace.right_dock().read(cx).is_open());
                     assert!(
                         workspace
                             .active_pane()
@@ -2500,7 +2432,7 @@ mod tests {
                         .collect::<Vec<_>>(),
                     &[Path::new(path!("/root/e")).into()]
                 );
-                assert!(workspace.left_dock().read(cx).is_open());
+                assert!(workspace.right_dock().read(cx).is_open());
                 assert!(workspace.active_pane().focus_handle(cx).is_focused(window));
             })
             .unwrap();
@@ -3454,7 +3386,11 @@ mod tests {
             PathBuf::from(path!("/root/.git/HEAD")),
             PathBuf::from(path!("/root/excluded_dir/ignored_subdir")),
         ];
-        let (opened_workspace, new_items) = cx
+        let workspace::OpenResult {
+            window: opened_workspace,
+            opened_items: new_items,
+            ..
+        } = cx
             .update(|cx| {
                 workspace::open_paths(
                     &paths_to_open,
@@ -4890,6 +4826,7 @@ mod tests {
                 "task",
                 "terminal",
                 "terminal_panel",
+                "theme",
                 "theme_selector",
                 "toast",
                 "toolchain",
@@ -5877,7 +5814,9 @@ mod tests {
         //
         //   Window A: workspace for dir1, workspace for dir2
         //   Window B: workspace for dir3
-        let (window_a, _) = cx
+        let workspace::OpenResult {
+            window: window_a, ..
+        } = cx
             .update(|cx| {
                 Workspace::new_local(
                     vec![dir1.into()],
@@ -5901,7 +5840,9 @@ mod tests {
             .expect("failed to open second workspace into window A");
         cx.run_until_parked();
 
-        let (window_b, _) = cx
+        let workspace::OpenResult {
+            window: window_b, ..
+        } = cx
             .update(|cx| {
                 Workspace::new_local(
                     vec![dir3.into()],
@@ -5931,9 +5872,11 @@ mod tests {
         cx.run_until_parked();
 
         // Verify all workspaces retained their session_ids.
-        let locations = workspace::last_session_workspace_locations(&session_id, None, fs.as_ref())
-            .await
-            .expect("expected session workspace locations");
+        let db = cx.update(|cx| workspace::WorkspaceDb::global(cx));
+        let locations =
+            workspace::last_session_workspace_locations(&db, &session_id, None, fs.as_ref())
+                .await
+                .expect("expected session workspace locations");
         assert_eq!(
             locations.len(),
             3,
@@ -5960,9 +5903,10 @@ mod tests {
         });
 
         // --- Read back from DB and verify grouping ---
-        let locations = workspace::last_session_workspace_locations(&session_id, None, fs.as_ref())
-            .await
-            .expect("expected session workspace locations");
+        let locations =
+            workspace::last_session_workspace_locations(&db, &session_id, None, fs.as_ref())
+                .await
+                .expect("expected session workspace locations");
 
         assert_eq!(locations.len(), 3, "expected 3 session workspaces");
 

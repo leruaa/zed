@@ -119,6 +119,7 @@ pub enum Event {
     DiffHunksToggled,
     Edited {
         edited_buffer: Option<Entity<Buffer>>,
+        is_local: bool,
     },
     TransactionUndone {
         transaction_id: TransactionId,
@@ -1912,6 +1913,7 @@ impl MultiBuffer {
 
         cx.emit(Event::Edited {
             edited_buffer: None,
+            is_local: true,
         });
         cx.emit(Event::ExcerptsAdded {
             buffer,
@@ -1974,6 +1976,7 @@ impl MultiBuffer {
         }
         cx.emit(Event::Edited {
             edited_buffer: None,
+            is_local: true,
         });
         cx.emit(Event::ExcerptsRemoved {
             ids,
@@ -2138,7 +2141,7 @@ impl MultiBuffer {
             if point < start {
                 found = Some((start, excerpt_id));
             }
-            if point > end {
+            if point >= end {
                 found = Some((end, excerpt_id));
             }
         }
@@ -2330,6 +2333,7 @@ impl MultiBuffer {
         }
         cx.emit(Event::Edited {
             edited_buffer: None,
+            is_local: true,
         });
         cx.emit(Event::ExcerptsRemoved {
             ids,
@@ -2394,8 +2398,9 @@ impl MultiBuffer {
         use language::BufferEvent;
         let buffer_id = buffer.read(cx).remote_id();
         cx.emit(match event {
-            BufferEvent::Edited => Event::Edited {
+            &BufferEvent::Edited { is_local } => Event::Edited {
                 edited_buffer: Some(buffer),
+                is_local,
             },
             BufferEvent::DirtyChanged => Event::DirtyChanged,
             BufferEvent::Saved => Event::Saved,
@@ -2485,6 +2490,7 @@ impl MultiBuffer {
         }
         cx.emit(Event::Edited {
             edited_buffer: None,
+            is_local: true,
         });
     }
 
@@ -2531,6 +2537,7 @@ impl MultiBuffer {
         }
         cx.emit(Event::Edited {
             edited_buffer: None,
+            is_local: true,
         });
     }
 
@@ -2770,6 +2777,7 @@ impl MultiBuffer {
         cx.emit(Event::DiffHunksToggled);
         cx.emit(Event::Edited {
             edited_buffer: None,
+            is_local: true,
         });
     }
 
@@ -2886,6 +2894,7 @@ impl MultiBuffer {
         cx.emit(Event::DiffHunksToggled);
         cx.emit(Event::Edited {
             edited_buffer: None,
+            is_local: true,
         });
     }
 
@@ -2953,6 +2962,7 @@ impl MultiBuffer {
         }
         cx.emit(Event::Edited {
             edited_buffer: None,
+            is_local: true,
         });
         cx.emit(Event::ExcerptsExpanded { ids: vec![id] });
         cx.notify();
@@ -3060,6 +3070,7 @@ impl MultiBuffer {
         }
         cx.emit(Event::Edited {
             edited_buffer: None,
+            is_local: true,
         });
         cx.emit(Event::ExcerptsExpanded { ids });
         cx.notify();
@@ -3703,6 +3714,7 @@ impl MultiBuffer {
         cx.emit(Event::DiffHunksToggled);
         cx.emit(Event::Edited {
             edited_buffer: None,
+            is_local: true,
         });
     }
 }
@@ -5177,6 +5189,11 @@ impl MultiBufferSnapshot {
         }
     }
 
+    pub fn line_len_utf16(&self, row: MultiBufferRow) -> u32 {
+        self.clip_point_utf16(Unclipped(PointUtf16::new(row.0, u32::MAX)), Bias::Left)
+            .column
+    }
+
     pub fn buffer_line_for_row(
         &self,
         row: MultiBufferRow,
@@ -6335,7 +6352,7 @@ impl MultiBufferSnapshot {
     pub fn runnable_ranges(
         &self,
         range: Range<Anchor>,
-    ) -> impl Iterator<Item = (Range<MultiBufferOffset>, language::RunnableRange)> + '_ {
+    ) -> impl Iterator<Item = (Range<Anchor>, language::RunnableRange)> + '_ {
         let range = range.start.to_offset(self)..range.end.to_offset(self);
         self.lift_buffer_metadata(range, move |buffer, range| {
             Some(
@@ -6348,7 +6365,12 @@ impl MultiBufferSnapshot {
                     .map(|runnable| (runnable.run_range.clone(), runnable)),
             )
         })
-        .map(|(run_range, runnable, _)| (run_range, runnable))
+        .map(|(run_range, runnable, _)| {
+            (
+                self.anchor_after(run_range.start)..self.anchor_before(run_range.end),
+                runnable,
+            )
+        })
     }
 
     pub fn line_indents(

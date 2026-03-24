@@ -118,7 +118,7 @@ pub struct Edit {
     pub new_text: String,
 }
 
-#[derive(Default, Debug, Deserialize)]
+#[derive(Clone, Default, Debug, Deserialize)]
 struct StreamingEditFileToolPartialInput {
     #[serde(default)]
     display_description: Option<String>,
@@ -132,7 +132,7 @@ struct StreamingEditFileToolPartialInput {
     edits: Option<Vec<PartialEdit>>,
 }
 
-#[derive(Default, Debug, Deserialize)]
+#[derive(Clone, Default, Debug, Deserialize)]
 pub struct PartialEdit {
     #[serde(default)]
     pub old_text: Option<String>,
@@ -314,12 +314,19 @@ impl AgentTool for StreamingEditFileTool {
     ) -> Task<Result<Self::Output, Self::Output>> {
         cx.spawn(async move |cx: &mut AsyncApp| {
             let mut state: Option<EditSession> = None;
+            let mut last_partial: Option<StreamingEditFileToolPartialInput> = None;
             loop {
                 futures::select! {
                     partial = input.recv_partial().fuse() => {
                         let Some(partial_value) = partial else { break };
                         if let Ok(parsed) = serde_json::from_value::<StreamingEditFileToolPartialInput>(partial_value) {
+                            let path_complete = parsed.path.is_some()
+                                && parsed.path.as_ref() == last_partial.as_ref().and_then(|p| p.path.as_ref());
+
+                            last_partial = Some(parsed.clone());
+
                             if state.is_none()
+                                && path_complete
                                 && let StreamingEditFileToolPartialInput {
                                     path: Some(path),
                                     display_description: Some(display_description),
@@ -768,14 +775,6 @@ impl EditSession {
 
         ensure_buffer_saved(&buffer, &abs_path, tool, cx)?;
 
-        if matches!(mode, StreamingEditFileMode::Write) {
-            tool.action_log.update(cx, |log, cx| {
-                log.buffer_created(buffer.clone(), cx);
-            });
-        }
-        tool.action_log
-            .update(cx, |log, cx| log.buffer_read(buffer.clone(), cx));
-
         let diff = cx.new(|cx| match mode {
             StreamingEditFileMode::Write => Diff::manual(buffer.clone(), cx),
             StreamingEditFileMode::Edit => Diff::new(buffer.clone(), cx),
@@ -788,6 +787,11 @@ impl EditSession {
                 diff.update(&mut cx, |diff, cx| diff.finalize(cx)).ok();
             }
         }) as Box<dyn FnOnce()>);
+
+        tool.action_log.update(cx, |log, cx| match mode {
+            StreamingEditFileMode::Write => log.buffer_created(buffer.clone(), cx),
+            StreamingEditFileMode::Edit => log.buffer_read(buffer.clone(), cx),
+        });
 
         let old_snapshot = buffer.read_with(cx, |buffer, _cx| buffer.snapshot());
         let old_text = cx
@@ -1979,6 +1983,13 @@ mod tests {
             "display_description": "Single edit",
             "path": "root/file.txt",
             "mode": "edit",
+        }));
+        cx.run_until_parked();
+
+        sender.send_partial(json!({
+            "display_description": "Single edit",
+            "path": "root/file.txt",
+            "mode": "edit",
             "edits": [{"old_text": "hello world", "new_text": "goodbye world"}]
         }));
         cx.run_until_parked();
@@ -2637,7 +2648,10 @@ mod tests {
 
         event
             .response
-            .send(acp::PermissionOptionId::new("allow"))
+            .send(acp_thread::SelectedPermissionOutcome::new(
+                acp::PermissionOptionId::new("allow"),
+                acp::PermissionOptionKind::AllowOnce,
+            ))
             .unwrap();
         authorize_task.await.unwrap();
     }
@@ -3546,6 +3560,12 @@ mod tests {
         sender.send_partial(json!({
             "display_description": "Overwrite file",
             "path": "root/file.txt",
+        }));
+        cx.run_until_parked();
+
+        sender.send_partial(json!({
+            "display_description": "Overwrite file",
+            "path": "root/file.txt",
             "mode": "write"
         }));
         cx.run_until_parked();
@@ -3618,8 +3638,9 @@ mod tests {
         // Verify buffer still has old content (no content partial yet)
         let buffer = project.update(cx, |project, cx| {
             let path = project.find_project_path("root/file.txt", cx).unwrap();
-            project.get_open_buffer(&path, cx).unwrap()
+            project.open_buffer(path, cx)
         });
+        let buffer = buffer.await.unwrap();
         assert_eq!(
             buffer.read_with(cx, |b, _| b.text()),
             "old line 1\nold line 2\nold line 3\n"
@@ -3758,7 +3779,7 @@ mod tests {
         assert!(
             !changed.is_empty(),
             "action_log.changed_buffers() should be non-empty after streaming edit,
-             but no changed buffers were found \u{2014} Accept All / Reject All will not appear"
+             but no changed buffers were found - Accept All / Reject All will not appear"
         );
     }
 
@@ -3800,6 +3821,157 @@ mod tests {
             !changed.is_empty(),
             "action_log.changed_buffers() should be non-empty after streaming write, \
              but no changed buffers were found \u{2014} Accept All / Reject All will not appear"
+        );
+    }
+
+    #[gpui::test]
+    async fn test_streaming_edit_file_tool_fields_out_of_order_in_write_mode(
+        cx: &mut TestAppContext,
+    ) {
+        let (tool, _project, _action_log, _fs, _thread) =
+            setup_test(cx, json!({"file.txt": "old_content"})).await;
+        let (sender, input) = ToolInput::<StreamingEditFileToolInput>::test();
+        let (event_stream, _receiver) = ToolCallEventStream::test();
+        let task = cx.update(|cx| tool.clone().run(input, event_stream, cx));
+
+        sender.send_partial(json!({
+            "display_description": "Overwrite file",
+            "mode": "write"
+        }));
+        cx.run_until_parked();
+
+        sender.send_partial(json!({
+            "display_description": "Overwrite file",
+            "mode": "write",
+            "content": "new_content"
+        }));
+        cx.run_until_parked();
+
+        sender.send_partial(json!({
+            "display_description": "Overwrite file",
+            "mode": "write",
+            "content": "new_content",
+            "path": "root"
+        }));
+        cx.run_until_parked();
+
+        // Send final.
+        sender.send_final(json!({
+            "display_description": "Overwrite file",
+            "mode": "write",
+            "content": "new_content",
+            "path": "root/file.txt"
+        }));
+
+        let result = task.await;
+        let StreamingEditFileToolOutput::Success { new_text, .. } = result.unwrap() else {
+            panic!("expected success");
+        };
+        assert_eq!(new_text, "new_content");
+    }
+
+    #[gpui::test]
+    async fn test_streaming_edit_file_tool_fields_out_of_order_in_edit_mode(
+        cx: &mut TestAppContext,
+    ) {
+        let (tool, _project, _action_log, _fs, _thread) =
+            setup_test(cx, json!({"file.txt": "old_content"})).await;
+        let (sender, input) = ToolInput::<StreamingEditFileToolInput>::test();
+        let (event_stream, _receiver) = ToolCallEventStream::test();
+        let task = cx.update(|cx| tool.clone().run(input, event_stream, cx));
+
+        sender.send_partial(json!({
+            "display_description": "Overwrite file",
+            "mode": "edit"
+        }));
+        cx.run_until_parked();
+
+        sender.send_partial(json!({
+            "display_description": "Overwrite file",
+            "mode": "edit",
+            "edits": [{"old_text": "old_content"}]
+        }));
+        cx.run_until_parked();
+
+        sender.send_partial(json!({
+            "display_description": "Overwrite file",
+            "mode": "edit",
+            "edits": [{"old_text": "old_content", "new_text": "new_content"}]
+        }));
+        cx.run_until_parked();
+
+        sender.send_partial(json!({
+            "display_description": "Overwrite file",
+            "mode": "edit",
+            "edits": [{"old_text": "old_content", "new_text": "new_content"}],
+            "path": "root"
+        }));
+        cx.run_until_parked();
+
+        // Send final.
+        sender.send_final(json!({
+            "display_description": "Overwrite file",
+            "mode": "edit",
+            "edits": [{"old_text": "old_content", "new_text": "new_content"}],
+            "path": "root/file.txt"
+        }));
+        cx.run_until_parked();
+
+        let result = task.await;
+        let StreamingEditFileToolOutput::Success { new_text, .. } = result.unwrap() else {
+            panic!("expected success");
+        };
+        assert_eq!(new_text, "new_content");
+    }
+
+    #[gpui::test]
+    async fn test_streaming_reject_created_file_deletes_it(cx: &mut TestAppContext) {
+        let (tool, _project, action_log, fs, _thread) = setup_test(cx, json!({"dir": {}})).await;
+        cx.update(|cx| {
+            let mut settings = agent_settings::AgentSettings::get_global(cx).clone();
+            settings.tool_permissions.default = settings::ToolPermissionMode::Allow;
+            agent_settings::AgentSettings::override_global(settings, cx);
+        });
+
+        // Create a new file via the streaming edit file tool
+        let (event_stream, _rx) = ToolCallEventStream::test();
+        let task = cx.update(|cx| {
+            tool.clone().run(
+                ToolInput::resolved(StreamingEditFileToolInput {
+                    display_description: "Create new file".into(),
+                    path: "root/dir/new_file.txt".into(),
+                    mode: StreamingEditFileMode::Write,
+                    content: Some("Hello, World!".into()),
+                    edits: None,
+                }),
+                event_stream,
+                cx,
+            )
+        });
+        let result = task.await;
+        assert!(result.is_ok(), "create should succeed: {:?}", result.err());
+        cx.run_until_parked();
+
+        assert!(
+            fs.is_file(path!("/root/dir/new_file.txt").as_ref()).await,
+            "file should exist after creation"
+        );
+
+        // Reject all edits — this should delete the newly created file
+        let changed = action_log.read_with(cx, |log, cx| log.changed_buffers(cx));
+        assert!(
+            !changed.is_empty(),
+            "action_log should track the created file as changed"
+        );
+
+        action_log
+            .update(cx, |log, cx| log.reject_all_edits(None, cx))
+            .await;
+        cx.run_until_parked();
+
+        assert!(
+            !fs.is_file(path!("/root/dir/new_file.txt").as_ref()).await,
+            "file should be deleted after rejecting creation, but an empty file was left behind"
         );
     }
 
