@@ -1136,6 +1136,7 @@ impl WindowsWindowInner {
         {
             panic!("Device lost: {err}");
         }
+        self.state.force_render_after_recovery.set(true);
         Some(0)
     }
 
@@ -1143,10 +1144,12 @@ impl WindowsWindowInner {
     fn draw_window(&self, handle: HWND, force_render: bool) -> Option<isize> {
         let mut request_frame = self.state.callbacks.request_frame.take()?;
 
-        // we are instructing gpui to force render a frame, this will
-        // re-populate all the gpu textures for us so we can resume drawing in
-        // case we disabled drawing earlier due to a device loss
-        self.state.renderer.borrow_mut().mark_drawable();
+        let force_render = force_render || self.state.force_render_after_recovery.take();
+        if force_render {
+            // Re-enable drawing after a device loss recovery. The forced render
+            // will rebuild the scene with fresh atlas textures.
+            self.state.renderer.borrow_mut().mark_drawable();
+        }
         request_frame(RequestFrameOptions {
             require_presentation: false,
             force_render,

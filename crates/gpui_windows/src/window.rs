@@ -59,6 +59,7 @@ pub struct WindowsWindowState {
     pub hovered: Cell<bool>,
 
     pub renderer: RefCell<DirectXRenderer>,
+    pub force_render_after_recovery: Cell<bool>,
 
     pub click_state: ClickState,
     pub current_cursor: Cell<Option<HCURSOR>>,
@@ -149,6 +150,7 @@ impl WindowsWindowState {
             last_reported_capslock: Cell::new(last_reported_capslock),
             hovered: Cell::new(hovered),
             renderer: RefCell::new(renderer),
+            force_render_after_recovery: Cell::new(false),
             click_state,
             current_cursor: Cell::new(current_cursor),
             nc_button_pressed: Cell::new(nc_button_pressed),
