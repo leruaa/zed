@@ -118,7 +118,7 @@ pub trait Fs: Send + Sync {
     /// Moves a directory to the system trash.
     /// Returns a [`TrashedEntry`] that can be used to keep track of the
     /// location of the trashed directory in the system's trash.
-    async fn trash_dir(&self, path: &Path, options: RemoveOptions) -> Result<TrashedEntry>;
+    async fn trash_dir(&self, path: &Path) -> Result<TrashedEntry>;
 
     /// Removes a file from the filesystem.
     /// There is no expectation that the file will be preserved in the system
@@ -128,7 +128,7 @@ pub trait Fs: Send + Sync {
     /// Moves a file to the system trash.
     /// Returns a [`TrashedEntry`] that can be used to keep track of the
     /// location of the trashed file in the system's trash.
-    async fn trash_file(&self, path: &Path, options: RemoveOptions) -> Result<TrashedEntry>;
+    async fn trash_file(&self, path: &Path) -> Result<TrashedEntry>;
 
     async fn open_handle(&self, path: &Path) -> Result<Arc<dyn FileHandle>>;
     async fn open_sync(&self, path: &Path) -> Result<Box<dyn io::Read + Send + Sync>>;
@@ -759,12 +759,12 @@ impl Fs for RealFs {
         }
     }
 
-    async fn trash_file(&self, path: &Path, _options: RemoveOptions) -> Result<TrashedEntry> {
+    async fn trash_file(&self, path: &Path) -> Result<TrashedEntry> {
         Ok(trash::delete_with_info(path)?.into())
     }
 
-    async fn trash_dir(&self, path: &Path, options: RemoveOptions) -> Result<TrashedEntry> {
-        self.trash_file(path, options).await
+    async fn trash_dir(&self, path: &Path) -> Result<TrashedEntry> {
+        self.trash_file(path).await
     }
 
     async fn open_sync(&self, path: &Path) -> Result<Box<dyn io::Read + Send + Sync>> {
@@ -2624,10 +2624,14 @@ impl Fs for FakeFs {
         self.remove_dir_inner(path, options).await.map(|_| ())
     }
 
-    async fn trash_dir(&self, path: &Path, options: RemoveOptions) -> Result<TrashedEntry> {
+    async fn trash_dir(&self, path: &Path) -> Result<TrashedEntry> {
         let normalized_path = normalize_path(path);
         let parent_path = normalized_path.parent().context("cannot remove the root")?;
         let base_name = normalized_path.file_name().unwrap();
+        let options = RemoveOptions {
+            recursive: true,
+            ..Default::default()
+        };
 
         match self.remove_dir_inner(path, options).await? {
             Some(fake_entry) => {
@@ -2649,12 +2653,12 @@ impl Fs for FakeFs {
         self.remove_file_inner(path, options).await.map(|_| ())
     }
 
-    async fn trash_file(&self, path: &Path, options: RemoveOptions) -> Result<TrashedEntry> {
+    async fn trash_file(&self, path: &Path) -> Result<TrashedEntry> {
         let normalized_path = normalize_path(path);
         let parent_path = normalized_path.parent().context("cannot remove the root")?;
         let base_name = normalized_path.file_name().unwrap();
 
-        match self.remove_file_inner(path, options).await? {
+        match self.remove_file_inner(path, Default::default()).await? {
             Some(fake_entry) => {
                 let trashed_entry = TrashedEntry {
                     id: base_name.to_str().unwrap().into(),
