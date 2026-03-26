@@ -12,12 +12,10 @@ use chrono::Utc;
 use db::kvp::KeyValueStore;
 use editor::Editor;
 use feature_flags::{AgentV2FeatureFlag, FeatureFlagViewExt as _};
-
 use gpui::{
     Action as _, AnyElement, App, Context, Entity, FocusHandle, Focusable, ListState, Pixels,
     Render, SharedString, Task, WeakEntity, Window, WindowHandle, list, prelude::*, px,
 };
-
 use menu::{
     Cancel, Confirm, SelectChild, SelectFirst, SelectLast, SelectNext, SelectParent, SelectPrevious,
 };
@@ -28,7 +26,6 @@ use ui::utils::platform_title_bar_height;
 use serde::{Deserialize, Serialize};
 use settings::Settings as _;
 use std::collections::{HashMap, HashSet};
-
 use std::mem;
 use std::path::Path;
 use std::rc::Rc;
@@ -40,7 +37,6 @@ use ui::{
 };
 use util::path_list::PathList;
 use util::{ResultExt as _, TryFutureExt as _};
-
 use workspace::{
     AddFolderToProject, FocusWorkspaceSidebar, MultiWorkspace, MultiWorkspaceEvent, Open,
     SerializedPathList, Sidebar as WorkspaceSidebar, ToggleWorkspaceSidebar, Workspace,
@@ -258,7 +254,6 @@ fn load_collapsed_groups(kvp: &KeyValueStore) -> HashSet<PathList> {
 }
 
 /// The sidebar re-derives its entire entry list from scratch on every
-
 /// change via `update_entries` → `rebuild_contents`. Avoid adding
 /// incremental or inter-event coordination state — if something can
 /// be computed from the current world state, compute it in the rebuild.
@@ -269,7 +264,6 @@ pub struct Sidebar {
     filter_editor: Entity<Editor>,
     list_state: ListState,
     contents: SidebarContents,
-
     /// The index of the list item that currently has the keyboard focus
     ///
     /// Note: This is NOT the same as the active item.
@@ -285,7 +279,6 @@ pub struct Sidebar {
     collapsed_groups: HashSet<PathList>,
     expanded_groups: HashMap<PathList, usize>,
     pending_serialization: Task<Option<()>>,
-
     view: SidebarView,
     recent_projects_popover_handle: PopoverMenuHandle<SidebarRecentProjects>,
     project_header_menu_ix: Option<usize>,
@@ -381,7 +374,6 @@ impl Sidebar {
             collapsed_groups,
             expanded_groups: HashMap::new(),
             pending_serialization: Task::ready(None),
-
             view: SidebarView::default(),
             recent_projects_popover_handle: PopoverMenuHandle::default(),
             project_header_menu_ix: None,
