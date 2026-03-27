@@ -839,28 +839,14 @@ impl Worktree {
         &mut self,
         trash_entry: TrashedEntry,
         cx: &mut Context<Worktree>,
-    ) -> Option<Task<Result<CreatedEntry>>> {
-        let task = match self {
+    ) -> Task<Result<RelPathBuf>> {
+        match self {
             Worktree::Local(this) => this.restore_entry(trash_entry, cx),
-            Worktree::Remote(this) => this.restore_entry(trash_entry, cx),
-        }?;
+            // TODO!(dino): Add support for restoring entries in remote worktrees.
+            Worktree::Remote(_this) => Task::ready(Err(anyhow!("Unsupported"))),
+        }
 
-        // TODO(yara) get rid of commeted part
-        // let entry = match &*self {
-        //     Worktree::Local(this) => this.entry_for_id(entry_id),
-        //     Worktree::Remote(this) => this.entry_for_id(entry_id),
-        // }?;
-
-        // let mut ids = vec![entry_id];
-        // let path = &*entry.path;
-
-        // TODO(yara) do we need to do this? (just test without and see I guess)
-        // self.get_children_ids_recursive(path, &mut ids);
-
-        // for id in ids {
-        //     cx.emit(Event::DeletedEntry(id));
-        // }
-        Some(task)
+        // TODO(yara) do we need to emit events, test and see if it works without doing that.
     }
 
     fn get_children_ids_recursive(&self, path: &RelPath, ids: &mut Vec<ProjectEntryId>) {
@@ -1684,33 +1670,22 @@ impl LocalWorktree {
         &self,
         trash_entry: TrashedEntry,
         cx: &Context<Worktree>,
-    ) -> Task<Result<CreatedEntry>> {
+    ) -> Task<Result<RelPathBuf>> {
         let fs = self.fs.clone();
         let path_style = self.path_style();
 
-        let (tx, rx) = futures::channel::oneshot::channel();
-        std::thread::Builder::new()
-            .name("restore trashed item".to_string())
-            .spawn(|| {
-                let path = fs.restore(trash_entry);
-                let rel_path = RelPath::new(&path, path_style)
-                    .context("")
-                    .to_rel_path_buf();
-                tx.send(rel_path)
-            })
-            .context("Failed to spawn thread")?;
-
         cx.spawn(async move |this, cx| {
-            let rel_path = rx.await.context("Tx dropped or fs.restore panicked")??;
-            this.update(cx, |this, _| {
-                this.as_local_mut()
-                    .unwrap()
-                    .refresh_entries_for_paths(vec![rel_path])
-            })?
-            .recv()
-            .await;
+            let path_buf = fs.restore(trash_entry).await?;
 
-            Ok(trashed_entry)
+            this.update(cx, |this, _| {
+                let path = path_buf
+                    .strip_prefix(this.abs_path())
+                    .context("Could not strip prefix")?;
+                let path = RelPath::new(&path, path_style)?;
+                let path = path.into_owned();
+                Ok(path)
+            })
+            .flatten()
         })
     }
 

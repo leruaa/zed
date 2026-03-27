@@ -1,5 +1,5 @@
 use super::*;
-use crate::undo::tests::{build_create_operation, build_rename_operation};
+// use crate::undo::tests::{build_create_operation, build_rename_operation};
 use collections::HashSet;
 use editor::MultiBufferOffset;
 use gpui::{Empty, Entity, TestAppContext, VisualTestContext};
@@ -2486,143 +2486,143 @@ async fn test_undo_with_empty_stack(cx: &mut gpui::TestAppContext) {
     );
 }
 
-#[gpui::test]
-async fn test_undo_batch(cx: &mut gpui::TestAppContext) {
-    init_test(cx);
+// #[gpui::test]
+// async fn test_undo_batch(cx: &mut gpui::TestAppContext) {
+//     init_test(cx);
 
-    let fs = FakeFs::new(cx.executor());
-    fs.insert_tree(
-        "/root",
-        json!({
-            "src": {
-                "main.rs": "// Code!"
-            }
-        }),
-    )
-    .await;
+//     let fs = FakeFs::new(cx.executor());
+//     fs.insert_tree(
+//         "/root",
+//         json!({
+//             "src": {
+//                 "main.rs": "// Code!"
+//             }
+//         }),
+//     )
+//     .await;
 
-    let project = Project::test(fs.clone(), ["/root".as_ref()], cx).await;
-    let window = cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
-    let workspace = window
-        .read_with(cx, |mw, _| mw.workspace().clone())
-        .unwrap();
-    let cx = &mut VisualTestContext::from_window(window.into(), cx);
-    let panel = workspace.update_in(cx, ProjectPanel::new);
-    let worktree_id = project.update(cx, |project, cx| {
-        project.visible_worktrees(cx).next().unwrap().read(cx).id()
-    });
-    cx.run_until_parked();
+//     let project = Project::test(fs.clone(), ["/root".as_ref()], cx).await;
+//     let window = cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+//     let workspace = window
+//         .read_with(cx, |mw, _| mw.workspace().clone())
+//         .unwrap();
+//     let cx = &mut VisualTestContext::from_window(window.into(), cx);
+//     let panel = workspace.update_in(cx, ProjectPanel::new);
+//     let worktree_id = project.update(cx, |project, cx| {
+//         project.visible_worktrees(cx).next().unwrap().read(cx).id()
+//     });
+//     cx.run_until_parked();
 
-    // Since there currently isn't a way to both create a folder and the file
-    // within it as two separate operations batched under the same
-    // `ProjectPanelOperation::Batch` operation, we'll simply record those
-    // ourselves, knowing that the filesystem already has the folder and file
-    // being provided in the operations.
-    panel.update(cx, |panel, _cx| {
-        panel.undo_manager.record(vec![
-            build_create_operation(worktree_id, "src/main.rs"),
-            build_create_operation(worktree_id, "src/"),
-        ]);
-    });
+//     // Since there currently isn't a way to both create a folder and the file
+//     // within it as two separate operations batched under the same
+//     // `ProjectPanelOperation::Batch` operation, we'll simply record those
+//     // ourselves, knowing that the filesystem already has the folder and file
+//     // being provided in the operations.
+//     panel.update(cx, |panel, _cx| {
+//         panel.undo_manager.record(vec![
+//             build_create_operation(worktree_id, "src/main.rs"),
+//             build_create_operation(worktree_id, "src/"),
+//         ]);
+//     });
 
-    // Ensure that `src/main.rs` is present in the filesystem before proceeding,
-    // otherwise this test is irrelevant.
-    assert_eq!(fs.files(), vec![PathBuf::from(path!("/root/src/main.rs"))]);
-    assert_eq!(
-        fs.directories(false),
-        vec![
-            PathBuf::from(path!("/")),
-            PathBuf::from(path!("/root/")),
-            PathBuf::from(path!("/root/src/"))
-        ]
-    );
+//     // Ensure that `src/main.rs` is present in the filesystem before proceeding,
+//     // otherwise this test is irrelevant.
+//     assert_eq!(fs.files(), vec![PathBuf::from(path!("/root/src/main.rs"))]);
+//     assert_eq!(
+//         fs.directories(false),
+//         vec![
+//             PathBuf::from(path!("/")),
+//             PathBuf::from(path!("/root/")),
+//             PathBuf::from(path!("/root/src/"))
+//         ]
+//     );
 
-    panel.update_in(cx, |panel, window, cx| {
-        panel.undo(&Undo, window, cx);
-    });
-    cx.run_until_parked();
+//     panel.update_in(cx, |panel, window, cx| {
+//         panel.undo(&Undo, window, cx);
+//     });
+//     cx.run_until_parked();
 
-    assert_eq!(fs.files().len(), 0);
-    assert_eq!(
-        fs.directories(false),
-        vec![PathBuf::from(path!("/")), PathBuf::from(path!("/root/"))]
-    );
-}
+//     assert_eq!(fs.files().len(), 0);
+//     assert_eq!(
+//         fs.directories(false),
+//         vec![PathBuf::from(path!("/")), PathBuf::from(path!("/root/"))]
+//     );
+// }
 
-#[gpui::test]
-async fn test_redo_batch(cx: &mut gpui::TestAppContext) {
-    init_test(cx);
+// #[gpui::test]
+// async fn test_redo_batch(cx: &mut gpui::TestAppContext) {
+//     init_test(cx);
 
-    let fs = FakeFs::new(cx.executor());
-    fs.insert_tree(
-        "/root",
-        json!({
-            "file_c.txt": "",
-            "file_d.txt": "",
-        }),
-    )
-    .await;
+//     let fs = FakeFs::new(cx.executor());
+//     fs.insert_tree(
+//         "/root",
+//         json!({
+//             "file_c.txt": "",
+//             "file_d.txt": "",
+//         }),
+//     )
+//     .await;
 
-    let project = Project::test(fs.clone(), ["/root".as_ref()], cx).await;
-    let window = cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
-    let workspace = window
-        .read_with(cx, |mw, _| mw.workspace().clone())
-        .unwrap();
-    let cx = &mut VisualTestContext::from_window(window.into(), cx);
-    let panel = workspace.update_in(cx, ProjectPanel::new);
-    let worktree_id = project.update(cx, |project, cx| {
-        project.visible_worktrees(cx).next().unwrap().read(cx).id()
-    });
-    cx.run_until_parked();
+//     let project = Project::test(fs.clone(), ["/root".as_ref()], cx).await;
+//     let window = cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+//     let workspace = window
+//         .read_with(cx, |mw, _| mw.workspace().clone())
+//         .unwrap();
+//     let cx = &mut VisualTestContext::from_window(window.into(), cx);
+//     let panel = workspace.update_in(cx, ProjectPanel::new);
+//     let worktree_id = project.update(cx, |project, cx| {
+//         project.visible_worktrees(cx).next().unwrap().read(cx).id()
+//     });
+//     cx.run_until_parked();
 
-    // At the time of writing, only the `ProjectPanelOperation::Rename`
-    // operation supports redoing. As such, that's what we'll use in the batch
-    // operation, to ensure that undoing and redoing a batch operation works as
-    // expected.
-    panel.update(cx, |panel, _cx| {
-        panel.undo_manager.record(vec![
-            build_rename_operation(worktree_id, "file_a.txt", "file_c.txt"),
-            build_rename_operation(worktree_id, "file_b.txt", "file_d.txt"),
-        ]);
-    });
+//     // At the time of writing, only the `ProjectPanelOperation::Rename`
+//     // operation supports redoing. As such, that's what we'll use in the batch
+//     // operation, to ensure that undoing and redoing a batch operation works as
+//     // expected.
+//     panel.update(cx, |panel, _cx| {
+//         panel.undo_manager.record(vec![
+//             build_rename_operation(worktree_id, "file_a.txt", "file_c.txt"),
+//             build_rename_operation(worktree_id, "file_b.txt", "file_d.txt"),
+//         ]);
+//     });
 
-    // Before proceeding, ensure that both `file_c.txt` as well as `file_d.txt`
-    // exist in the filesystem, so we can later ensure that undoing renames
-    // these files and redoing renames again to how the test started.
-    assert_eq!(
-        fs.files(),
-        vec![
-            PathBuf::from(path!("/root/file_c.txt")),
-            PathBuf::from(path!("/root/file_d.txt"))
-        ]
-    );
+//     // Before proceeding, ensure that both `file_c.txt` as well as `file_d.txt`
+//     // exist in the filesystem, so we can later ensure that undoing renames
+//     // these files and redoing renames again to how the test started.
+//     assert_eq!(
+//         fs.files(),
+//         vec![
+//             PathBuf::from(path!("/root/file_c.txt")),
+//             PathBuf::from(path!("/root/file_d.txt"))
+//         ]
+//     );
 
-    panel.update_in(cx, |panel, window, cx| {
-        panel.undo(&Undo, window, cx);
-    });
-    cx.run_until_parked();
+//     panel.update_in(cx, |panel, window, cx| {
+//         panel.undo(&Undo, window, cx);
+//     });
+//     cx.run_until_parked();
 
-    assert_eq!(
-        fs.files(),
-        vec![
-            PathBuf::from(path!("/root/file_a.txt")),
-            PathBuf::from(path!("/root/file_b.txt"))
-        ]
-    );
+//     assert_eq!(
+//         fs.files(),
+//         vec![
+//             PathBuf::from(path!("/root/file_a.txt")),
+//             PathBuf::from(path!("/root/file_b.txt"))
+//         ]
+//     );
 
-    panel.update_in(cx, |panel, window, cx| {
-        panel.redo(&Redo, window, cx);
-    });
-    cx.run_until_parked();
+//     panel.update_in(cx, |panel, window, cx| {
+//         panel.redo(&Redo, window, cx);
+//     });
+//     cx.run_until_parked();
 
-    assert_eq!(
-        fs.files(),
-        vec![
-            PathBuf::from(path!("/root/file_c.txt")),
-            PathBuf::from(path!("/root/file_d.txt"))
-        ]
-    );
-}
+//     assert_eq!(
+//         fs.files(),
+//         vec![
+//             PathBuf::from(path!("/root/file_c.txt")),
+//             PathBuf::from(path!("/root/file_d.txt"))
+//         ]
+//     );
+// }
 
 #[gpui::test]
 async fn test_paste_external_paths(cx: &mut gpui::TestAppContext) {

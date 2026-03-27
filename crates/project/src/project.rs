@@ -2511,14 +2511,23 @@ impl Project {
     }
 
     #[inline]
-    pub fn restore_entry(
+    pub async fn restore_entry(
         &mut self,
+        worktree_id: WorktreeId,
         trash_entry: TrashedEntry,
-        cx: &mut Context<Self>,
-    ) -> Option<Task<Result<Option<ProjectPath>>>> {
-        // TODO!(yara) do we need this?
-        // cx.emit(Event::RestoreEntry(worktree.read(cx).id(), entry_id));
-        worktree.update(cx, |worktree, cx| worktree.restore_entry(trash_entry, cx))
+        cx: &mut Context<'_, Self>,
+    ) -> Result<ProjectPath> {
+        let Some(worktree) = self.worktree_for_id(worktree_id, cx) else {
+            return Err(anyhow!("No worktree for id {worktree_id:?}"));
+        };
+
+        worktree
+            .update(cx, |worktree, cx| worktree.restore_entry(trash_entry, cx))
+            .await
+            .map(|rel_path_buf| ProjectPath {
+                worktree_id: worktree_id,
+                path: Arc::from(rel_path_buf.as_rel_path()),
+            })
     }
 
     #[inline]

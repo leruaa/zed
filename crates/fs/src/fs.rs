@@ -172,7 +172,7 @@ pub trait Fs: Send + Sync {
 
     /// Restores a given `TrashedEntry`, moving it from the system's trash back
     /// to the original path.
-    fn restore(
+    async fn restore(
         &self,
         trashed_entry: TrashedEntry,
     ) -> std::result::Result<PathBuf, TrashRestoreError>;
@@ -222,13 +222,13 @@ impl TrashedEntry {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TrashRestoreError {
-    /// The specified `path` was not found in the system's trash.
+    #[error("The specified `path` ({}) was not found in the system's trash.", path.display())]
     NotFound { path: PathBuf },
-    /// A file or directory already exists at the restore destination.
+    #[error("File or directory ({}) already exists at the restore destination.", path.display())]
     Collision { path: PathBuf },
-    /// Any other platform-specific error.
+    #[error("Unknown error ({description})")]
     Unknown { description: String },
 }
 
@@ -813,7 +813,7 @@ impl Fs for RealFs {
         std::thread::Builder::new()
             .name("trash file or dir".to_string())
             .spawn(|| tx.send(trash::delete_with_info(path)))
-            .context("Failed to spawn thread")?;
+            .expect("The os can spawn threads");
 
         Ok(rx
             .await
@@ -1272,12 +1272,21 @@ impl Fs for RealFs {
         res
     }
 
-    fn restore(
+    async fn restore(
         &self,
         trashed_entry: TrashedEntry,
     ) -> std::result::Result<PathBuf, TrashRestoreError> {
         let restored_item_path = trashed_entry.original_parent.join(&trashed_entry.name);
-        trash::restore_all([trashed_entry.into_trash_item()])?;
+
+        let (tx, rx) = futures::channel::oneshot::channel();
+        std::thread::Builder::new()
+            .name("restore trashed item".to_string())
+            .spawn(move || {
+                let res = trash::restore_all([trashed_entry.into_trash_item()]);
+                tx.send(res)
+            })
+            .expect("The OS can spawn a threads");
+        rx.await.expect("Restore all never panics")?;
         Ok(restored_item_path)
     }
 }
@@ -2986,10 +2995,7 @@ impl Fs for FakeFs {
         receiver
     }
 
-    fn restore(
-        &self,
-        trashed_entry: TrashedEntry,
-    ) -> std::result::Result<PathBuf, TrashRestoreError> {
+    async fn restore(&self, trashed_entry: TrashedEntry) -> Result<PathBuf, TrashRestoreError> {
         let mut state = self.state.lock();
 
         let Some((trashed_entry, fake_entry)) = state
