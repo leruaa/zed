@@ -60,16 +60,6 @@ mod project_group_builder;
 #[cfg(test)]
 mod sidebar_tests;
 
-gpui::actions!(
-    agents_sidebar,
-    [
-        /// Creates a new thread in the currently selected or active project group.
-        NewThreadInGroup,
-        /// Toggles between the thread list and the archive view.
-        ToggleArchive,
-    ]
-);
-
 const DEFAULT_WIDTH: Pixels = px(300.0);
 const MIN_WIDTH: Pixels = px(200.0);
 const MAX_WIDTH: Pixels = px(800.0);
