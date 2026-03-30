@@ -763,7 +763,11 @@ impl Sidebar {
                 for workspace in &group.workspaces {
                     let ws_path_list = workspace_path_list(workspace, cx);
 
-                    for row in thread_store.read(cx).entries_for_path(&ws_path_list) {
+                    for row in thread_store
+                        .read(cx)
+                        .entries_for_path(&ws_path_list)
+                        .cloned()
+                    {
                         if !seen_session_ids.insert(row.session_id.clone()) {
                             continue;
                         }

@@ -4490,7 +4490,6 @@ async fn test_archive_thread_keeps_metadata_but_hides_from_sidebar(cx: &mut Test
         let archived: Vec<_> = store.read(cx).archived_entries().collect();
         assert_eq!(archived.len(), 1);
         assert_eq!(archived[0].session_id.0.as_ref(), "thread-to-archive");
-        assert!(archived[0].archived);
     });
 }
 

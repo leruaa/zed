@@ -545,25 +545,6 @@ mod tests {
     }
 
     #[test]
-    fn test_collect_marks_all_imported_threads_as_archived() {
-        let existing = HashSet::default();
-        let paths = PathList::new(&[Path::new("/project")]);
-
-        let sessions_by_agent = vec![(
-            AgentId::new("agent-a"),
-            vec![
-                make_session("s1", Some("Thread 1"), Some(paths.clone()), None, None),
-                make_session("s2", Some("Thread 2"), Some(paths), None, None),
-            ],
-        )];
-
-        let result = collect_importable_threads(sessions_by_agent, existing);
-
-        assert_eq!(result.len(), 2);
-        assert!(result.iter().all(|t| t.archived));
-    }
-
-    #[test]
     fn test_collect_assigns_correct_agent_id_per_session() {
         let existing = HashSet::default();
         let paths = PathList::new(&[Path::new("/project")]);

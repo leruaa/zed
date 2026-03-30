@@ -14,7 +14,7 @@ use db::{
 };
 use feature_flags::{AgentV2FeatureFlag, FeatureFlagAppExt};
 use futures::{FutureExt as _, future::Shared};
-use gpui::{AppContext as _, Entity, Global, Subscription, Task, proptest::num::f64::NEGATIVE};
+use gpui::{AppContext as _, Entity, Global, Subscription, Task};
 use project::AgentId;
 use ui::{App, Context, SharedString};
 use util::ResultExt as _;
@@ -77,7 +77,7 @@ fn migrate_thread_metadata(cx: &mut App) {
         // Manually save each entry to the database and call reload, otherwise
         // we'll end up triggering lots of reloads after each save
         for entry in to_migrate {
-            db.save(entry, true).await?;
+            db.save(entry, Some(true)).await?;
         }
 
         log::info!("Finished migrating thread store entries");
@@ -127,12 +127,8 @@ struct DbThreadMetadata {
     pub archived: bool,
 }
 
-
 impl ThreadMetadata {
-    pub fn from_thread(
-        thread: &Entity<acp_thread::AcpThread>,
-        cx: &App,
-    ) -> Self {
+    pub fn from_thread(thread: &Entity<acp_thread::AcpThread>, cx: &App) -> Self {
         let thread_ref = thread.read(cx);
         let session_id = thread_ref.session_id().clone();
         let title = thread_ref
@@ -178,7 +174,6 @@ pub struct ThreadMetadataStore {
 
 #[derive(Debug, PartialEq)]
 enum DbOperation {
-    UpdateArchived(acp::SessionId, bool),
     Upsert(ThreadMetadata, Option<bool>),
     Delete(acp::SessionId),
 }
@@ -186,7 +181,6 @@ enum DbOperation {
 impl DbOperation {
     fn id(&self) -> &acp::SessionId {
         match self {
-            DbOperation::UpdateArchived(session_id, _) => session_id,
             DbOperation::Upsert(thread, _) => &thread.session_id,
             DbOperation::Delete(session_id) => session_id,
         }
@@ -230,29 +224,33 @@ impl ThreadMetadataStore {
 
     /// Returns all thread IDs.
     pub fn entry_ids(&self) -> impl Iterator<Item = acp::SessionId> + '_ {
-        self.threads.keys().chain(self.archived_threads.keys()).cloned()
+        self.threads
+            .keys()
+            .chain(self.archived_threads.keys())
+            .cloned()
     }
 
     /// Returns all threads.
-    pub fn entries(&self) -> impl Iterator<Item = ThreadMetadata> + '_ {
-        self.threads.values().cloned().chain(self.archived_threads.values().cloned())
+    pub fn entries(&self) -> impl Iterator<Item = &ThreadMetadata> + '_ {
+        self.threads.values().chain(self.archived_threads.values())
+    }
+
+    /// Returns all threads that are not archived.
+    pub fn non_archived_entries(&self) -> impl Iterator<Item = &ThreadMetadata> + '_ {
+        self.threads.values()
     }
 
     /// Returns all archived threads.
-    pub fn archived_entries(&self) -> impl Iterator<Item = ThreadMetadata> + '_ {
-        self.archived_threads.values().cloned()
+    pub fn archived_entries(&self) -> impl Iterator<Item = &ThreadMetadata> + '_ {
+        self.archived_threads.values()
     }
 
     /// Returns all threads for the given path list, excluding archived threads.
     pub fn entries_for_path(
         &self,
         path_list: &PathList,
-    ) -> impl Iterator<Item = ThreadMetadata> + '_ {
-        self.threads_by_paths
-            .get(path_list)
-            .into_iter()
-            .flatten()
-            .cloned()
+    ) -> impl Iterator<Item = &ThreadMetadata> + '_ {
+        self.threads_by_paths.get(path_list).into_iter().flatten()
     }
 
     fn reload(&mut self, cx: &mut Context<Self>) -> Shared<Task<()>> {
@@ -277,7 +275,9 @@ impl ThreadMetadataStore {
                         let metadata = ThreadMetadata::from(row);
 
                         if is_archived {
-                            this.archived_threads.entry(metadata.session_id.clone()).or_insert(metadata);
+                            this.archived_threads
+                                .entry(metadata.session_id.clone())
+                                .or_insert(metadata);
                         } else {
                             this.threads_by_paths
                                 .entry(metadata.folder_paths.clone())
@@ -336,9 +336,14 @@ impl ThreadMetadataStore {
             return;
         }
 
-        self.pending_thread_ops_tx
-            .try_send(DbOperation::UpdateArchived(session_id.clone(), archived))
-            .log_err();
+        if let Some(metadata) = self
+            .entries()
+            .find(|thread| &thread.session_id == session_id)
+        {
+            self.pending_thread_ops_tx
+                .try_send(DbOperation::Upsert(metadata.clone(), Some(archived)))
+                .log_err();
+        }
     }
 
     pub fn delete(&mut self, session_id: acp::SessionId, cx: &mut Context<Self>) {
@@ -408,9 +413,6 @@ impl ThreadMetadataStore {
                             DbOperation::Delete(session_id) => {
                                 db.delete(session_id).await.log_err();
                             }
-                            DbOperation::UpdateArchived(session_id, archived) => {
-                                db.update_archived(&session_id, archived).await.log_err();
-                            },
                         }
                     }
 
@@ -438,29 +440,19 @@ impl ThreadMetadataStore {
         for operation in operations.into_iter().rev() {
             if let Some(existing_operation) = ops.get_mut(operation.id()) {
                 match (existing_operation, operation) {
-                    (DbOperation::Delete(_), _) => {
+                    (
+                        DbOperation::Upsert(_, existing_archive),
+                        DbOperation::Upsert(_, Some(archive)),
+                    ) if existing_archive.is_none() => {
+                        *existing_archive = Some(archive);
+                    }
+                    _ => {
                         continue;
                     }
-                    (DbOperation::UpdateArchived(_, _), DbOperation::UpdateArchived(_, _)) => {
-                        continue;
-                    },
-                    (DbOperation::Upsert(_, left_archive), DbOperation::UpdateArchived(_, right_archive)) if left_archive.is_none() => {
-                        *left_archive = Some(right_archive);
-                    }
-                    (DbOperation::UpdateArchived(_, left_archive), DbOperation::Upsert(thread_metadata, right_archive)) if right_archive.is_none() => {
-                        let archive = *left_archive;
-                        *existing_operation = DbOperation::Upsert(thread_metadata, Some(archive));
-                    }
-                    _ => todo!()
-                    // (DbOperation::UpdateArchived(session_id, _), DbOperation::Upsert(thread_metadata, _)) => todo!(),
-                    // (DbOperation::UpdateArchived(session_id, _), DbOperation::Delete(session_id)) => todo!(),
-                    // (DbOperation::Upsert(thread_metadata, _), DbOperation::UpdateArchived(session_id, _)) => todo!(),
-                    // (DbOperation::Upsert(thread_metadata, _), DbOperation::Upsert(thread_metadata, _)) => todo!(),
-                    // (DbOperation::Upsert(thread_metadata, _), DbOperation::Delete(session_id)) => todo!(),
                 };
-                continue;
+            } else {
+                ops.insert(operation.id().clone(), operation);
             }
-            ops.insert(operation.id().clone(), operation);
         }
         ops.into_values().collect()
     }
@@ -582,18 +574,6 @@ impl ThreadMetadataDb {
         .await
     }
 
-    pub async fn update_archived(&self, session_id: &acp::SessionId, archived: bool) -> anyhow::Result<()> {
-        let id = session_id.0.clone();
-        self.write(move |conn| {
-            let mut stmt =
-                Statement::prepare(conn, "UPDATE sidebar_threads SET archived = ? WHERE session_id = ?")?;
-            stmt.bind(&archived, 1)?;
-            stmt.bind(&id, 2)?;
-            stmt.exec()
-        })
-        .await
-    }
-
     /// Delete metadata for a single thread.
     pub async fn delete(&self, session_id: acp::SessionId) -> anyhow::Result<()> {
         let id = session_id.0.clone();
@@ -696,7 +676,6 @@ mod tests {
         folder_paths: PathList,
     ) -> ThreadMetadata {
         ThreadMetadata {
-            archived: false,
             session_id: acp::SessionId::new(session_id),
             agent_id: agent::ZED_AGENT_ID.clone(),
             title: title.to_string().into(),
@@ -720,22 +699,16 @@ mod tests {
             &db_name,
         )));
 
-        db.save(make_metadata(
-            "session-1",
-            "First Thread",
-            now,
-            first_paths.clone(),
-            false,
-        ))
+        db.save(
+            make_metadata("session-1", "First Thread", now, first_paths.clone()),
+            None,
+        )
         .await
         .unwrap();
-        db.save(make_metadata(
-            "session-2",
-            "Second Thread",
-            older,
-            second_paths.clone(),
-            false,
-        ))
+        db.save(
+            make_metadata("session-2", "Second Thread", older, second_paths.clone()),
+            None,
+        )
         .await
         .unwrap();
 
@@ -917,7 +890,6 @@ mod tests {
             updated_at: now - chrono::Duration::seconds(10),
             created_at: Some(now - chrono::Duration::seconds(10)),
             folder_paths: project_a_paths.clone(),
-            archived: false,
         };
 
         cx.update(|cx| {
@@ -979,7 +951,7 @@ mod tests {
 
         let list = cx.update(|cx| {
             let store = ThreadMetadataStore::global(cx);
-            store.read(cx).entries().collect::<Vec<_>>()
+            store.read(cx).entries().cloned().collect::<Vec<_>>()
         });
 
         assert_eq!(list.len(), 3);
@@ -988,14 +960,33 @@ mod tests {
                 .all(|metadata| metadata.agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref())
         );
 
-        let existing_metadata = list
+        let non_archived = cx.update(|cx| {
+            let store = ThreadMetadataStore::global(cx);
+            store
+                .read(cx)
+                .non_archived_entries()
+                .cloned()
+                .collect::<Vec<_>>()
+        });
+
+        assert_eq!(non_archived.len(), 1);
+        let existing_metadata = non_archived
             .iter()
             .find(|metadata| metadata.session_id.0.as_ref() == "a-session-0")
             .unwrap();
         assert_eq!(existing_metadata.title.as_ref(), "Existing Metadata");
-        assert!(!existing_metadata.archived);
 
-        let migrated_session_ids = list
+        let archived = cx.update(|cx| {
+            let store = ThreadMetadataStore::global(cx);
+            store
+                .read(cx)
+                .archived_entries()
+                .cloned()
+                .collect::<Vec<_>>()
+        });
+
+        assert_eq!(archived.len(), 2);
+        let migrated_session_ids = archived
             .iter()
             .map(|metadata| metadata.session_id.0.as_ref())
             .collect::<Vec<_>>();
@@ -1012,7 +1003,6 @@ mod tests {
                 .iter()
                 .all(|metadata| !metadata.folder_paths.is_empty())
         );
-        assert!(migrated_entries.iter().all(|metadata| metadata.archived));
     }
 
     #[gpui::test]
@@ -1034,7 +1024,6 @@ mod tests {
             updated_at: existing_updated_at,
             created_at: Some(existing_updated_at),
             folder_paths: project_paths.clone(),
-            archived: false,
         };
 
         cx.update(|cx| {
@@ -1067,7 +1056,7 @@ mod tests {
 
         let list = cx.update(|cx| {
             let store = ThreadMetadataStore::global(cx);
-            store.read(cx).entries().collect::<Vec<_>>()
+            store.read(cx).entries().cloned().collect::<Vec<_>>()
         });
 
         assert_eq!(list.len(), 1);
@@ -1247,7 +1236,7 @@ mod tests {
         // List all metadata from the store cache.
         let list = cx.update(|cx| {
             let store = ThreadMetadataStore::global(cx);
-            store.read(cx).entries().collect::<Vec<_>>()
+            store.read(cx).entries().cloned().collect::<Vec<_>>()
         });
 
         // The subagent thread should NOT appear in the sidebar metadata.
@@ -1268,12 +1257,10 @@ mod tests {
         let now = Utc::now();
 
         let operations = vec![
-            DbOperation::Upsert(make_metadata(
-                "session-1",
-                "First Thread",
-                now,
-                PathList::default(),
-            )),
+            DbOperation::Upsert(
+                make_metadata("session-1", "First Thread", now, PathList::default()),
+                None,
+            ),
             DbOperation::Delete(acp::SessionId::new("session-1")),
         ];
 
@@ -1295,12 +1282,12 @@ mod tests {
         let new_metadata = make_metadata("session-1", "New Title", later, PathList::default());
 
         let deduped = ThreadMetadataStore::dedup_db_operations(vec![
-            DbOperation::Upsert(old_metadata),
-            DbOperation::Upsert(new_metadata.clone()),
+            DbOperation::Upsert(old_metadata, None),
+            DbOperation::Upsert(new_metadata.clone(), None),
         ]);
 
         assert_eq!(deduped.len(), 1);
-        assert_eq!(deduped[0], DbOperation::Upsert(new_metadata));
+        assert_eq!(deduped[0], DbOperation::Upsert(new_metadata, None));
     }
 
     #[test]
@@ -1310,13 +1297,13 @@ mod tests {
         let metadata1 = make_metadata("session-1", "First Thread", now, PathList::default());
         let metadata2 = make_metadata("session-2", "Second Thread", now, PathList::default());
         let deduped = ThreadMetadataStore::dedup_db_operations(vec![
-            DbOperation::Upsert(metadata1.clone()),
-            DbOperation::Upsert(metadata2.clone()),
+            DbOperation::Upsert(metadata1.clone(), None),
+            DbOperation::Upsert(metadata2.clone(), None),
         ]);
 
         assert_eq!(deduped.len(), 2);
-        assert!(deduped.contains(&DbOperation::Upsert(metadata1)));
-        assert!(deduped.contains(&DbOperation::Upsert(metadata2)));
+        assert!(deduped.contains(&DbOperation::Upsert(metadata1, None)));
+        assert!(deduped.contains(&DbOperation::Upsert(metadata2, None)));
     }
 
     #[gpui::test]
@@ -1380,7 +1367,6 @@ mod tests {
             let archived = store.archived_entries().collect::<Vec<_>>();
             assert_eq!(archived.len(), 1);
             assert_eq!(archived[0].session_id.0.as_ref(), "session-1");
-            assert!(archived[0].archived);
         });
 
         cx.update(|cx| {
@@ -1406,6 +1392,7 @@ mod tests {
                 .archived_entries()
                 .map(|e| e.session_id.0.to_string())
                 .collect::<Vec<_>>();
+            dbg!(&archived);
             assert!(archived.is_empty());
         });
     }
@@ -1504,7 +1491,7 @@ mod tests {
         cx.update(|cx| {
             let store = ThreadMetadataStore::global(cx);
             store.update(cx, |store, cx| {
-                store.save_all(vec![m1, m2, m3], cx);
+                store.save_all_to_archive(vec![m1, m2, m3], cx);
             });
         });
 
@@ -1572,10 +1559,13 @@ mod tests {
             let store = ThreadMetadataStore::global(cx);
             let store = store.read(cx);
 
-            assert!(store
-                .entries()
-                .find(|e| e.session_id.0.as_ref() == "session-1").is_some(),
-                "thread should exist after reload");
+            assert!(
+                store
+                    .entries()
+                    .find(|e| e.session_id.0.as_ref() == "session-1")
+                    .is_some(),
+                "thread should exist after reload"
+            );
 
             let path_entries = store
                 .entries_for_path(&paths)
