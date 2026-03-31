@@ -2337,9 +2337,17 @@ impl Sidebar {
             path
         };
 
-        let need_creation = !already_exists || !row.restored;
+        // We need to create the worktree if it doesn't already exist at
+        // the final path (which may differ from the original due to a
+        // collision). If another thread already restored it (row.restored),
+        // we skip creation.
+        let final_path_exists = if final_worktree_path == *worktree_path {
+            already_exists
+        } else {
+            fs.metadata(&final_worktree_path).await?.is_some()
+        };
 
-        if need_creation && !already_exists {
+        if !final_path_exists && !row.restored {
             // Create the worktree in detached HEAD mode at the WIP commit.
             let create_receiver = main_repo.update(cx, |repo, _cx| {
                 repo.create_worktree_detached(final_worktree_path.clone(), commit_hash)
