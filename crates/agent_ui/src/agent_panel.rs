@@ -2102,6 +2102,11 @@ impl AgentPanel {
         }
     }
 
+    pub fn remove_thread(&mut self, session_id: &acp::SessionId, cx: &mut Context<Self>) {
+        self.background_threads.remove(session_id);
+        cx.notify();
+    }
+
     pub(crate) fn active_native_agent_thread(&self, cx: &App) -> Option<Entity<agent::Thread>> {
         match &self.active_view {
             ActiveView::AgentThread {

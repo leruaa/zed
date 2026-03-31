@@ -1055,6 +1055,8 @@ impl Sidebar {
                     }
                 }
 
+                draft_entries.sort_by_key(|d| d.thread.entity_id());
+
                 // Emit "New Thread" entries for threadless workspaces.
                 // If a threadless workspace has a draft, attach it.
                 let mut used_draft_indices: HashSet<usize> = HashSet::new();
@@ -1347,12 +1349,7 @@ impl Sidebar {
             IconName::ChevronDown
         };
 
-        let has_new_thread_entry = self
-            .contents
-            .entries
-            .get(ix + 1)
-            .is_some_and(|entry| matches!(entry, ListEntry::NewThread { .. }));
-        let show_new_thread_button = !has_new_thread_entry && !self.has_filter_query(cx);
+        let show_new_thread_button = !self.has_filter_query(cx);
 
         let workspace_for_remove = workspace.clone();
         let workspace_for_menu = workspace.clone();
@@ -1517,6 +1514,7 @@ impl Sidebar {
                         )
                     })
                     .when(show_new_thread_button, |this| {
+                        // hidden during search
                         this.child(
                             IconButton::new(
                                 SharedString::from(format!(
@@ -2417,74 +2415,89 @@ impl Sidebar {
     ) {
         ThreadMetadataStore::global(cx).update(cx, |store, cx| store.archive(session_id, cx));
 
-        // If we're archiving the currently focused thread, move focus to the
-        // nearest thread within the same project group. We never cross group
-        // boundaries — if the group has no other threads, clear focus and open
-        // a blank new thread in the panel instead.
         if self
             .active_entry
             .as_ref()
             .is_some_and(|e| e.is_active_thread(session_id))
         {
-            let current_pos = self.contents.entries.iter().position(|entry| {
-                matches!(entry, ListEntry::Thread(t) if &t.metadata.session_id == session_id)
-            });
+            self.navigate_to_nearest_sibling(session_id, window, cx);
+        }
+    }
 
-            // Find the workspace that owns this thread's project group by
-            // walking backwards to the nearest ProjectHeader. We must use
-            // *this* workspace (not the active workspace) because the user
-            // might be archiving a thread in a non-active group.
-            let group_workspace = current_pos.and_then(|pos| {
-                self.contents.entries[..pos]
-                    .iter()
-                    .rev()
-                    .find_map(|e| match e {
-                        ListEntry::ProjectHeader { workspace, .. } => Some(workspace.clone()),
-                        _ => None,
-                    })
-            });
+    /// Navigate to the nearest thread sibling within the same project group,
+    /// or fall back to a blank draft if no siblings exist.
+    fn navigate_to_nearest_sibling(
+        &mut self,
+        session_id: &acp::SessionId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current_pos = self.contents.entries.iter().position(|entry| match entry {
+            ListEntry::Thread(t) => &t.metadata.session_id == session_id,
+            ListEntry::NewThread { draft_thread, .. } => draft_thread
+                .as_ref()
+                .is_some_and(|t| t.read(cx).session_id() == session_id),
+            _ => false,
+        });
 
-            let next_thread = current_pos.and_then(|pos| {
-                let group_start = self.contents.entries[..pos]
-                    .iter()
-                    .rposition(|e| matches!(e, ListEntry::ProjectHeader { .. }))
-                    .map_or(0, |i| i + 1);
-                let group_end = self.contents.entries[pos + 1..]
-                    .iter()
-                    .position(|e| matches!(e, ListEntry::ProjectHeader { .. }))
-                    .map_or(self.contents.entries.len(), |i| pos + 1 + i);
-
-                let above = self.contents.entries[group_start..pos]
-                    .iter()
-                    .rev()
-                    .find_map(|entry| {
-                        if let ListEntry::Thread(t) = entry {
-                            Some(t)
-                        } else {
-                            None
-                        }
-                    });
-
-                above.or_else(|| {
-                    self.contents.entries[pos + 1..group_end]
-                        .iter()
-                        .find_map(|entry| {
-                            if let ListEntry::Thread(t) = entry {
-                                Some(t)
-                            } else {
-                                None
-                            }
-                        })
+        let group_workspace = current_pos.and_then(|pos| {
+            self.contents.entries[..pos]
+                .iter()
+                .rev()
+                .find_map(|e| match e {
+                    ListEntry::ProjectHeader { workspace, .. } => Some(workspace.clone()),
+                    _ => None,
                 })
-            });
+        });
 
-            if let Some(next) = next_thread {
+        enum Sibling {
+            Thread(ThreadEntry),
+            Draft {
+                session_id: acp::SessionId,
+                workspace: Entity<Workspace>,
+            },
+        }
+
+        let is_sibling = |entry: &ListEntry| -> Option<Sibling> {
+            match entry {
+                ListEntry::Thread(t) => Some(Sibling::Thread(t.clone())),
+                ListEntry::NewThread {
+                    draft_thread: Some(thread),
+                    workspace,
+                    ..
+                } => Some(Sibling::Draft {
+                    session_id: thread.read(cx).session_id().clone(),
+                    workspace: workspace.clone(),
+                }),
+                _ => None,
+            }
+        };
+
+        let next_sibling = current_pos.and_then(|pos| {
+            let group_start = self.contents.entries[..pos]
+                .iter()
+                .rposition(|e| matches!(e, ListEntry::ProjectHeader { .. }))
+                .map_or(0, |i| i + 1);
+            let group_end = self.contents.entries[pos + 1..]
+                .iter()
+                .position(|e| matches!(e, ListEntry::ProjectHeader { .. }))
+                .map_or(self.contents.entries.len(), |i| pos + 1 + i);
+
+            let above = self.contents.entries[group_start..pos]
+                .iter()
+                .rev()
+                .find_map(is_sibling);
+
+            above.or_else(|| {
+                self.contents.entries[pos + 1..group_end]
+                    .iter()
+                    .find_map(is_sibling)
+            })
+        });
+
+        match next_sibling {
+            Some(Sibling::Thread(next)) => {
                 let next_metadata = next.metadata.clone();
-                // Use the thread's own workspace when it has one open (e.g. an absorbed
-                // linked worktree thread that appears under the main workspace's header
-                // but belongs to its own workspace). Loading into the wrong panel binds
-                // the thread to the wrong project, which corrupts its stored folder_paths
-                // when metadata is saved via ThreadMetadata::from_thread.
                 let target_workspace = match &next.workspace {
                     ThreadEntryWorkspace::Open(ws) => Some(ws.clone()),
                     ThreadEntryWorkspace::Closed(_) => group_workspace,
@@ -2512,17 +2525,52 @@ impl Sidebar {
                         });
                     }
                 }
-            } else {
+            }
+            Some(Sibling::Draft {
+                session_id: draft_id,
+                workspace,
+            }) => {
+                self.create_new_thread(&workspace, Some(draft_id), window, cx);
+            }
+            None => {
                 if let Some(workspace) = &group_workspace {
                     self.active_entry = Some(ActiveEntry::draft_for_workspace(workspace.clone()));
-                    if let Some(agent_panel) = workspace.read(cx).panel::<AgentPanel>(cx) {
-                        agent_panel.update(cx, |panel, cx| {
-                            panel.new_thread(&NewThread, window, cx);
-                        });
-                    }
                 }
             }
         }
+    }
+
+    fn dismiss_draft_thread(
+        &mut self,
+        session_id: &acp::SessionId,
+        workspace: &Entity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let is_active = self.active_entry.as_ref().is_some_and(|entry| match entry {
+            ActiveEntry::Draft {
+                session_id: Some(id),
+                workspace: ws,
+            } => id == session_id && ws == workspace,
+            _ => false,
+        });
+
+        if is_active {
+            self.navigate_to_nearest_sibling(session_id, window, cx);
+        }
+
+        // Remove the conversation from the panel so the AcpThread entity
+        // is dropped, which prevents its observer from re-saving metadata.
+        if let Some(agent_panel) = workspace.read(cx).panel::<AgentPanel>(cx) {
+            agent_panel.update(cx, |panel, cx| {
+                panel.remove_thread(session_id, cx);
+            });
+        }
+
+        ThreadMetadataStore::global(cx)
+            .update(cx, |store, cx| store.delete(session_id.clone(), cx));
+
+        self.update_entries(cx);
     }
 
     fn remove_selected_thread(
@@ -3144,6 +3192,8 @@ impl Sidebar {
         let draft_session_id = draft_thread.map(|thread| thread.read(cx).session_id().clone());
         let id = SharedString::from(format!("new-thread-btn-{}", ix));
 
+        let is_hovered = self.hovered_thread_index == Some(ix);
+
         let thread_item = ThreadItem::new(id, label)
             .icon(IconName::Plus)
             .icon_color(Color::Custom(cx.theme().colors().icon_muted.opacity(0.8)))
@@ -3159,7 +3209,31 @@ impl Sidebar {
             )
             .selected(is_active)
             .focused(is_selected)
+            .hovered(is_hovered)
+            .on_hover(cx.listener(move |this, is_hovered: &bool, _window, cx| {
+                if *is_hovered {
+                    this.hovered_thread_index = Some(ix);
+                } else if this.hovered_thread_index == Some(ix) {
+                    this.hovered_thread_index = None;
+                }
+                cx.notify();
+            }))
+            .when(is_hovered && draft_session_id.is_some(), |this| {
+                let session_id = draft_session_id.clone().unwrap();
+                let workspace = workspace.clone();
+                this.action_slot(
+                    IconButton::new("dismiss-draft", IconName::Close)
+                        .icon_size(IconSize::Small)
+                        .icon_color(Color::Muted)
+                        .tooltip(Tooltip::text("Dismiss Draft"))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.dismiss_draft_thread(&session_id, &workspace, window, cx);
+                        })),
+                )
+            })
             .when(!is_active, |this| {
+                let workspace = workspace.clone();
+                let draft_session_id = draft_session_id.clone();
                 this.on_click(cx.listener(move |this, _, window, cx| {
                     this.selection = None;
                     this.create_new_thread(&workspace, draft_session_id.clone(), window, cx);
