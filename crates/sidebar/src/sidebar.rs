@@ -2996,16 +2996,28 @@ impl Sidebar {
                 let head_sha_result = worktree_repo.update(cx, |repo, _cx| repo.head_sha());
                 let commit_hash = match head_sha_result.await {
                     Ok(Ok(Some(sha))) => sha,
-                    Ok(Ok(None)) => {
-                        log::error!("HEAD SHA is None after WIP commit");
-                        return anyhow::Ok(());
-                    }
-                    Ok(Err(err)) => {
-                        log::error!("Failed to get HEAD SHA: {err}");
-                        return anyhow::Ok(());
-                    }
-                    Err(_) => {
-                        log::error!("HEAD SHA operation was canceled");
+                    sha_result => {
+                        let reason = match &sha_result {
+                            Ok(Ok(None)) => "HEAD SHA is None".into(),
+                            Ok(Err(err)) => format!("Failed to get HEAD SHA: {err}"),
+                            Err(_) => "HEAD SHA operation was canceled".into(),
+                            Ok(Ok(Some(_))) => unreachable!(),
+                        };
+                        log::error!("{reason} after WIP commit; attempting to undo");
+                        // Try to undo the WIP commit so we don't leave
+                        // phantom commits in the worktree.
+                        let reset_receiver = worktree_repo.update(cx, |repo, cx| {
+                            repo.reset("HEAD~".to_string(), ResetMode::Mixed, cx)
+                        });
+                        match reset_receiver.await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(err)) => {
+                                log::error!("Failed to undo WIP commit: {err}");
+                            }
+                            Err(_) => {
+                                log::error!("WIP commit undo was canceled");
+                            }
+                        }
                         return anyhow::Ok(());
                     }
                 };
