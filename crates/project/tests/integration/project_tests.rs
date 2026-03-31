@@ -6095,6 +6095,107 @@ async fn test_dirty_buffer_reloads_after_undo(cx: &mut gpui::TestAppContext) {
 }
 
 #[gpui::test]
+async fn test_save_does_not_reload_when_format_removes_user_edits(cx: &mut gpui::TestAppContext) {
+    init_test(cx);
+
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree(
+        path!("/dir"),
+        json!({
+            "file.txt": "hello\nworld\n",
+        }),
+    )
+    .await;
+
+    let project = Project::test(fs.clone(), [path!("/dir").as_ref()], cx).await;
+    let buffer = project
+        .update(cx, |p, cx| p.open_local_buffer(path!("/dir/file.txt"), cx))
+        .await
+        .unwrap();
+
+    buffer.read_with(cx, |buffer, _| {
+        assert_eq!(buffer.text(), "hello\nworld\n");
+        assert!(!buffer.is_dirty());
+    });
+
+    // User adds trailing whitespace — the only edit.
+    buffer.update(cx, |buffer, cx| {
+        buffer.edit([(5..5, "  ")], None, cx);
+    });
+
+    buffer.read_with(cx, |buffer, _| {
+        assert_eq!(buffer.text(), "hello  \nworld\n");
+        assert!(buffer.is_dirty());
+    });
+
+    // An external tool writes different content to the file while the buffer is dirty.
+    fs.save(
+        path!("/dir/file.txt").as_ref(),
+        &"EXTERNAL CONTENT\n".into(),
+        Default::default(),
+    )
+    .await
+    .unwrap();
+    cx.executor().run_until_parked();
+
+    // The buffer has a conflict: file mtime changed and buffer has unsaved edits.
+    buffer.read_with(cx, |buffer, _| {
+        assert!(buffer.is_dirty());
+        assert!(buffer.has_conflict());
+        assert_eq!(buffer.text(), "hello  \nworld\n");
+        assert_ne!(
+            buffer.file().unwrap().disk_state().mtime(),
+            buffer.saved_mtime(),
+            "disk mtime should differ from saved mtime after external write"
+        );
+    });
+
+    // The user triggers a save, which formats the buffer then saves it.
+    let buffers = [buffer.clone()].into_iter().collect::<HashSet<_>>();
+    project
+        .update(cx, |project, cx| {
+            project.format(
+                buffers,
+                project::lsp_store::LspFormatTarget::Buffers,
+                true,
+                project::lsp_store::FormatTrigger::Save,
+                cx,
+            )
+        })
+        .await
+        .unwrap();
+
+    // After formatting, the trailing whitespace was removed.
+    // The buffer text should match what will be saved to disk.
+    let formatted_text = buffer.read_with(cx, |buffer, _| buffer.text());
+    assert_eq!(formatted_text, "hello\nworld\n");
+    cx.executor().run_until_parked();
+
+    // The buffer text must still be the formatted text — not reloaded from disk.
+    buffer.read_with(cx, |buffer, _| {
+        assert_eq!(
+            buffer.text(),
+            formatted_text,
+            "buffer should not have been reloaded from disk during format-on-save"
+        );
+    });
+
+    // Now save to disk.
+    project
+        .update(cx, |project, cx| project.save_buffer(buffer.clone(), cx))
+        .await
+        .unwrap();
+    cx.executor().run_until_parked();
+
+    // After save, the buffer should be clean and match disk.
+    buffer.read_with(cx, |buffer, _| {
+        assert_eq!(buffer.text(), "hello\nworld\n");
+        assert!(!buffer.is_dirty());
+        assert!(!buffer.has_conflict());
+    });
+}
+
+#[gpui::test]
 async fn test_buffer_file_changes_on_disk(cx: &mut gpui::TestAppContext) {
     init_test(cx);
 
