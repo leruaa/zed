@@ -36,7 +36,15 @@ pub struct FakeGitRepository {
 }
 
 #[derive(Debug, Clone)]
+pub struct FakeCommitSnapshot {
+    pub head_contents: HashMap<RepoPath, String>,
+    pub index_contents: HashMap<RepoPath, String>,
+    pub sha: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct FakeGitRepositoryState {
+    pub commit_history: Vec<FakeCommitSnapshot>,
     pub event_emitter: smol::channel::Sender<PathBuf>,
     pub unmerged_paths: HashMap<RepoPath, UnmergedStatus>,
     pub head_contents: HashMap<RepoPath, String>,
@@ -74,6 +82,7 @@ impl FakeGitRepositoryState {
             remotes: HashMap::default(),
             graph_commits: Vec::new(),
             worktrees: Vec::new(),
+            commit_history: Vec::new(),
         }
     }
 }
@@ -217,10 +226,27 @@ impl GitRepository for FakeGitRepository {
     fn reset(
         &self,
         _commit: String,
-        _mode: ResetMode,
+        mode: ResetMode,
         _env: Arc<HashMap<String, String>>,
     ) -> BoxFuture<'_, Result<()>> {
-        unimplemented!()
+        self.with_state_async(true, move |state| {
+            let Some(snapshot) = state.commit_history.pop() else {
+                anyhow::bail!("No commit to reset to");
+            };
+
+            match mode {
+                ResetMode::Soft => {
+                    state.head_contents = snapshot.head_contents;
+                }
+                ResetMode::Mixed => {
+                    state.head_contents = snapshot.head_contents;
+                    state.index_contents = state.head_contents.clone();
+                }
+            }
+
+            state.refs.insert("HEAD".into(), snapshot.sha);
+            Ok(())
+        })
     }
 
     fn checkout_files(
@@ -438,7 +464,7 @@ impl GitRepository for FakeGitRepository {
 
     fn create_worktree(
         &self,
-        branch_name: String,
+        branch_name: Option<String>,
         path: PathBuf,
         from_commit: Option<String>,
     ) -> BoxFuture<'_, Result<()>> {
@@ -460,18 +486,26 @@ impl GitRepository for FakeGitRepository {
             fs.with_git_state(&dot_git_path, true, {
                 let path = path.clone();
                 move |state| {
-                    if state.branches.contains(&branch_name) {
-                        bail!("a branch named '{}' already exists", branch_name);
-                    }
-                    let ref_name = format!("refs/heads/{branch_name}");
                     let sha = from_commit.unwrap_or_else(|| "fake-sha".to_string());
-                    state.refs.insert(ref_name.clone(), sha.clone());
-                    state.worktrees.push(Worktree {
-                        path,
-                        ref_name: Some(ref_name.into()),
-                        sha: sha.into(),
-                    });
-                    state.branches.insert(branch_name);
+                    if let Some(branch_name) = branch_name {
+                        if state.branches.contains(&branch_name) {
+                            bail!("a branch named '{}' already exists", branch_name);
+                        }
+                        let ref_name = format!("refs/heads/{branch_name}");
+                        state.refs.insert(ref_name.clone(), sha.clone());
+                        state.worktrees.push(Worktree {
+                            path,
+                            ref_name: Some(ref_name.into()),
+                            sha: sha.into(),
+                        });
+                        state.branches.insert(branch_name);
+                    } else {
+                        state.worktrees.push(Worktree {
+                            path,
+                            ref_name: None,
+                            sha: sha.into(),
+                        });
+                    }
                     Ok::<(), anyhow::Error>(())
                 }
             })??;
@@ -724,7 +758,21 @@ impl GitRepository for FakeGitRepository {
         _askpass: AskPassDelegate,
         _env: Arc<HashMap<String, String>>,
     ) -> BoxFuture<'_, Result<()>> {
-        async { Ok(()) }.boxed()
+        self.with_state_async(true, move |state| {
+            let old_sha = state.refs.get("HEAD").cloned().unwrap_or_default();
+            state.commit_history.push(FakeCommitSnapshot {
+                head_contents: state.head_contents.clone(),
+                index_contents: state.index_contents.clone(),
+                sha: old_sha,
+            });
+
+            state.head_contents = state.index_contents.clone();
+
+            let new_sha = format!("fake-commit-{}", state.commit_history.len());
+            state.refs.insert("HEAD".into(), new_sha);
+
+            Ok(())
+        })
     }
 
     fn run_hook(
@@ -1028,6 +1076,55 @@ impl GitRepository for FakeGitRepository {
 
     fn commit_data_reader(&self) -> Result<CommitDataReader> {
         anyhow::bail!("commit_data_reader not supported for FakeGitRepository")
+    }
+
+    fn update_ref(&self, ref_name: String, commit: String) -> BoxFuture<'_, Result<()>> {
+        self.with_state_async(true, move |state| {
+            state.refs.insert(ref_name, commit);
+            Ok(())
+        })
+    }
+
+    fn delete_ref(&self, ref_name: String) -> BoxFuture<'_, Result<()>> {
+        self.with_state_async(true, move |state| {
+            state.refs.remove(&ref_name);
+            Ok(())
+        })
+    }
+
+    fn stage_all_including_untracked(&self) -> BoxFuture<'_, Result<()>> {
+        let workdir_path = self.dot_git_path.parent().unwrap();
+        let git_files: Vec<(RepoPath, String)> = self
+            .fs
+            .files()
+            .iter()
+            .filter_map(|path| {
+                let repo_path = path.strip_prefix(workdir_path).ok()?;
+                if repo_path.starts_with(".git") {
+                    return None;
+                }
+                let content = self
+                    .fs
+                    .read_file_sync(path)
+                    .ok()
+                    .and_then(|bytes| String::from_utf8(bytes).ok())?;
+                let rel_path = RelPath::new(repo_path, PathStyle::local()).ok()?;
+                Some((RepoPath::from_rel_path(&rel_path), content))
+            })
+            .collect();
+
+        self.with_state_async(true, move |state| {
+            // Stage all filesystem contents, mirroring `git add -A`.
+            let fs_paths: HashSet<RepoPath> = git_files.iter().map(|(p, _)| p.clone()).collect();
+            for (path, content) in git_files {
+                state.index_contents.insert(path, content);
+            }
+            // Remove index entries for files that no longer exist on disk.
+            state
+                .index_contents
+                .retain(|path, _| fs_paths.contains(path));
+            Ok(())
+        })
     }
 
     fn set_trusted(&self, trusted: bool) {

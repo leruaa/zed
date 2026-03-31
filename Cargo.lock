@@ -15865,6 +15865,7 @@ dependencies = [
  "git",
  "gpui",
  "language_model",
+ "log",
  "menu",
  "platform_title_bar",
  "pretty_assertions",

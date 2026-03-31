@@ -473,7 +473,7 @@ async fn test_ssh_collaboration_git_worktrees(
     cx_b.update(|cx| {
         repo_b.update(cx, |repo, _| {
             repo.create_worktree(
-                "feature-branch".to_string(),
+                Some("feature-branch".to_string()),
                 worktree_directory.join("feature-branch"),
                 Some("abc123".to_string()),
             )
