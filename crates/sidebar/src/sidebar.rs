@@ -1709,16 +1709,6 @@ impl Sidebar {
             }
         }
 
-        if to_remove.is_empty() {
-            return;
-        }
-
-        if to_remove.len() == workspaces.len() {
-            multi_workspace.update(cx, |multi_workspace, cx| {
-                multi_workspace.create_empty_workspace(window, cx);
-            });
-        }
-
         for workspace in &to_remove {
             if let Some(multi_workspace) = self.multi_workspace.upgrade() {
                 multi_workspace.update(cx, |multi_workspace, cx| {

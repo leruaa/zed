@@ -5333,11 +5333,13 @@ async fn test_removing_workspace_also_removes_absorbed_worktrees(cx: &mut TestAp
     });
     cx.run_until_parked();
 
-    // The worktree workspaces should also have been removed.
-    // Before the fix, they remain in the sidebar as standalone entries.
+    // The absorbed worktree workspaces should be pruned. The last one
+    // survives because MultiWorkspace requires at least one workspace,
+    // but the first stale worktree is removed.
+    // Before the fix, both worktree workspaces remained in the sidebar.
     assert_eq!(
         visible_entries_as_strings(&sidebar, cx),
-        Vec::<String>::new(),
-        "removing the main workspace should also remove the absorbed worktree workspaces"
+        vec!["v [project]", "  Thread B {wt-feature-b}",],
+        "only the last stale worktree should remain (cannot remove the final workspace)"
     );
 }

@@ -5,7 +5,9 @@ use gpui::{
     ManagedView, MouseButton, Pixels, Render, Subscription, Task, Tiling, Window, WindowId,
     actions, deferred, px,
 };
-use project::{DisableAiSettings, Project};
+use project::DisableAiSettings;
+#[cfg(any(test, feature = "test-support"))]
+use project::Project;
 use settings::Settings;
 pub use settings::SidebarSide;
 use std::future::Future;
@@ -741,7 +743,12 @@ impl MultiWorkspace {
         workspace
     }
 
-    pub fn create_empty_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn create_test_workspace(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<()> {
         let app_state = self.workspace().read(cx).app_state().clone();
         let project = Project::local(
             app_state.client.clone(),
@@ -755,15 +762,6 @@ impl MultiWorkspace {
         );
         let new_workspace = cx.new(|cx| Workspace::new(None, project, app_state, window, cx));
         self.activate(new_workspace, window, cx);
-    }
-
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn create_test_workspace(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Task<()> {
-        self.create_empty_workspace(window, cx);
 
         let workspace = self.workspace().clone();
         let weak_workspace = workspace.downgrade();
