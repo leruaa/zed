@@ -386,6 +386,25 @@ pub struct Sidebar {
     _draft_observation: Option<gpui::Subscription>,
 }
 
+fn find_main_repo_in_workspaces(
+    workspaces: &[Entity<Workspace>],
+    main_repo_path: &std::path::Path,
+    cx: &App,
+) -> Option<Entity<git_store::Repository>> {
+    workspaces.iter().find_map(|workspace| {
+        let project = workspace.read(cx).project().clone();
+        project
+            .read(cx)
+            .repositories(cx)
+            .values()
+            .find_map(|repo_entity| {
+                let repo = repo_entity.read(cx);
+                (repo.is_main_worktree() && *repo.work_directory_abs_path == *main_repo_path)
+                    .then(|| repo_entity.clone())
+            })
+    })
+}
+
 impl Sidebar {
     pub fn new(
         multi_workspace: Entity<MultiWorkspace>,
@@ -2286,19 +2305,7 @@ impl Sidebar {
 
         // Find the main repo entity.
         let main_repo = cx.update(|_window, cx| {
-            workspaces.iter().find_map(|workspace| {
-                let project = workspace.read(cx).project().clone();
-                project
-                    .read(cx)
-                    .repositories(cx)
-                    .values()
-                    .find_map(|repo_entity| {
-                        let repo = repo_entity.read(cx);
-                        (repo.is_main_worktree()
-                            && *repo.work_directory_abs_path == *row.main_repo_path)
-                            .then(|| repo_entity.clone())
-                    })
-            })
+            find_main_repo_in_workspaces(workspaces, &row.main_repo_path, cx)
         })?;
 
         let Some(main_repo) = main_repo else {
@@ -2445,19 +2452,7 @@ impl Sidebar {
     ) -> anyhow::Result<PathBuf> {
         // Find the main repo entity.
         let main_repo = cx.update(|_window, cx| {
-            workspaces.iter().find_map(|workspace| {
-                let project = workspace.read(cx).project().clone();
-                project
-                    .read(cx)
-                    .repositories(cx)
-                    .values()
-                    .find_map(|repo_entity| {
-                        let repo = repo_entity.read(cx);
-                        (repo.is_main_worktree()
-                            && *repo.work_directory_abs_path == *row.main_repo_path)
-                            .then(|| repo_entity.clone())
-                    })
-            })
+            find_main_repo_in_workspaces(workspaces, &row.main_repo_path, cx)
         })?;
 
         let Some(main_repo) = main_repo else {
@@ -2504,19 +2499,7 @@ impl Sidebar {
     ) {
         // Delete the git ref from the main repo.
         let Ok(main_repo) = cx.update(|_window, cx| {
-            workspaces.iter().find_map(|workspace| {
-                let project = workspace.read(cx).project().clone();
-                project
-                    .read(cx)
-                    .repositories(cx)
-                    .values()
-                    .find_map(|repo_entity| {
-                        let repo = repo_entity.read(cx);
-                        (repo.is_main_worktree()
-                            && *repo.work_directory_abs_path == *row.main_repo_path)
-                            .then(|| repo_entity.clone())
-                    })
-            })
+            find_main_repo_in_workspaces(workspaces, &row.main_repo_path, cx)
         }) else {
             return;
         };
@@ -2869,18 +2852,7 @@ impl Sidebar {
             .entries_for_path(&folder_paths)
             .any(|entry| &entry.session_id != session_id);
 
-        let main_repo = workspaces.iter().find_map(|workspace| {
-            let project = workspace.read(cx).project().clone();
-            project
-                .read(cx)
-                .repositories(cx)
-                .values()
-                .find_map(|repo_entity| {
-                    let repo = repo_entity.read(cx);
-                    (repo.is_main_worktree() && *repo.work_directory_abs_path == *main_repo_path)
-                        .then(|| repo_entity.clone())
-                })
-        });
+        let main_repo = find_main_repo_in_workspaces(&workspaces, &main_repo_path, cx);
 
         let fs = <dyn fs::Fs>::global(cx);
         let worktree_path_str = worktree_path.to_string_lossy().to_string();
