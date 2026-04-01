@@ -17,7 +17,9 @@ use std::sync::Arc;
 
 use client::{Client, UserStore, zed_urls};
 use gpui::{AnyElement, Entity, IntoElement, ParentElement};
-use ui::{Divider, RegisterComponent, Tooltip, Vector, VectorName, prelude::*};
+use ui::{
+    Divider, List, ListBulletItem, RegisterComponent, Tooltip, Vector, VectorName, prelude::*,
+};
 
 #[derive(PartialEq)]
 pub enum SignInStatus {
@@ -439,6 +441,13 @@ impl Component for ZedAiOnboarding {
                         "Student Plan",
                         onboarding(SignInStatus::SignedIn, Some(Plan::ZedStudent), false),
                     ),
+                                        dismiss_onboarding: None,
+                                    }
+                                    .into_any_element(),
+                                ),
+                            )
+                            .into_any_element()
+                    }),
                 ])
                 .into_any_element(),
         )
