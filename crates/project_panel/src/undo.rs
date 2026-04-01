@@ -101,12 +101,44 @@
 //! 	2 Restored(ProjectPath)
 //!     2 +++cursor+++
 
+
+//! 
+//! create A;                                                      A
+//! rename A -> B;                                                 B
+//! undo (rename B -> A)       (takes 10s for some reason)         B (still b cause it's hanging for 10s)
+//! remove B                                                       _
+//! create B                                                       B
+//! put important content in B                                     B
+//! undo manger renames (does not hang)                            A
+//! remove A                                                       _
+//! user sad
+ 
+//! 
+//! create A;                                                      A
+//! rename A -> B;                                                 B
+//! undo (rename B -> A)       (takes 10s for some reason)         B (still b cause it's hanging for 10s)
+//! create C                                                       B
+//! -- src/c.rs
+//!    -- 
+
+//! 
+//! create docs/files/ directory                                   docs/files/
+//! create docs/files/a.txt                                        docs/files/
+//! undo (rename B -> A)       (takes 10s for some reason)         B (still b cause it's hanging for 10s)
+//! create C                                                       B
+//! -- src/c.rs
+//!    -- 
+
+
+//! List of "tainted files" that the user may not operate on
+
 use crate::ProjectPanel;
 use anyhow::{Result, anyhow};
 use fs::TrashedEntry;
 use gpui::{AppContext, AsyncApp, SharedString, Task, WeakEntity};
 use project::{ProjectPath, WorktreeId};
-use std::collections::VecDeque;
+use std::sync::Mutex;
+use std::{collections::VecDeque, sync::Arc};
 use ui::App;
 use workspace::{
     Workspace,
@@ -189,13 +221,26 @@ impl Change {
 // Imagine pressing undo 10000+ times?!
 const MAX_UNDO_OPERATIONS: usize = 10_000;
 
-pub struct UndoManager {
+struct Inner {
     workspace: WeakEntity<Workspace>,
     panel: WeakEntity<ProjectPanel>,
     history: VecDeque<Change>,
     cursor: usize,
     /// Maximum number of operations to keep on the undo history.
     limit: usize,
+}
+
+/// pls arc this
+#[derive(Clone)]
+pub struct UndoManager {
+    pending_recordings: Arc<Mutex<Vec<Change>>>,
+    inner: Arc<futures::lock::Mutex<Inner>>,
+}
+
+enum CanRedo {
+    Yes,
+    No,
+    NotNow,
 }
 
 impl UndoManager {
@@ -209,11 +254,14 @@ impl UndoManager {
         limit: usize,
     ) -> Self {
         Self {
-            workspace,
-            panel,
-            history: VecDeque::new(),
-            cursor: 0usize,
-            limit,
+            inner: Mutex::new(Inner {
+                workspace,
+                panel,
+                history: VecDeque::new(),
+                cursor: 0usize,
+                limit,
+            }),
+            pending_recordings: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -221,11 +269,15 @@ impl UndoManager {
         self.cursor > 0
     }
 
-    pub fn can_redo(&self) -> bool {
-        self.cursor < self.history.len()
+    pub fn can_redo(&self) -> CanRedo {
+        let Some(inner) = self.inner.try_lock() else { // TODO pending recs process (somekind of self.state() that does that first)
+            return CanRedo::NotNow;
+        }
+        
+        inner.cursor < inner.history.len()
     }
 
-    pub async fn undo(cx: &mut AsyncApp) -> Result<()> {
+    pub async fn undo(&mut self, cx: &mut AsyncApp) -> Result<()> {
         if !self.can_undo() {
             return Ok(());
         }
@@ -296,9 +348,14 @@ impl UndoManager {
         Ok(())
     }
 
+    pub fn record(&self, changes: impl IntoIterator<Item = Change>) {
+        let mut pending_recs = self.pending_recordings.lock().unwrap();
+        pending_recs.extend(changes);
+    }
+
     /// Passed in changes will always be performed as a single step
-    pub fn record(&mut self, changes: impl IntoIterator<Item = Change>) {
-        let mut changes = changes.into_iter();
+    pub fn process_recordings(&mut self) {
+        let mut changes = std::mem::take(&mut *self.pending_recordings.lock().unwrap()).into_iter();
         let Some(first) = changes.by_ref().next() else {
             return;
         };

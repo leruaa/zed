@@ -48,16 +48,16 @@ use settings::{
     update_settings_file,
 };
 use smallvec::SmallVec;
-use std::ops::Neg;
-use std::{any::TypeId, time::Instant};
 use std::{
+    any::TypeId,
     cell::OnceCell,
     cmp,
     collections::HashSet,
+    ops::Neg,
     ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use theme::ThemeSettings;
 use ui::{
@@ -66,6 +66,7 @@ use ui::{
     ListItem, ListItemSpacing, ScrollAxes, ScrollableHandle, Scrollbars, StickyCandidate, Tooltip,
     WithScrollbar, prelude::*, v_flex,
 };
+use futures::lock::Mutex;
 use util::{
     ResultExt, TakeUntilExt, TryFutureExt, maybe,
     paths::{PathStyle, compare_paths},
@@ -161,7 +162,7 @@ pub struct ProjectPanel {
     sticky_items_count: usize,
     last_reported_update: Instant,
     update_visible_entries_task: UpdateVisibleEntriesTask,
-    undo_manager: Entity<UndoManager>,
+    undo_manager: Arc<Mutex<UndoManager>>,
     state: State,
 }
 
@@ -903,8 +904,8 @@ impl ProjectPanel {
                     unfolded_dir_ids: Default::default(),
                 },
                 update_visible_entries_task: Default::default(),
-                undo_manager: cx
-                    .new(move |_| UndoManager::new(workspace.weak_handle(), weak_project_panel)),
+                undo_manager: Arc::new(Mutex::new(
+                    UndoManager::new(workspace.weak_handle(), weak_project_panel))),
             };
             this.update_visible_entries(None, false, false, window, cx);
 
@@ -1944,23 +1945,21 @@ impl ProjectPanel {
 
         Some(cx.spawn_in(window, async move |project_panel, cx| {
             let new_entry = edit_task.await;
-            project_panel.update(cx, |project_panel, cx| {
+            let undo_manager = project_panel.update(cx, |project_panel, cx| {
                 project_panel.state.edit_state = None;
-
-                // Record the operation if the edit was applied
-                if new_entry.is_ok() {
-                    let operation = if let Some(old_entry) = edited_entry {
-                        Change::Renamed((worktree_id, old_entry.path).into(), new_project_path)
-                    } else {
-                        Change::Created(new_project_path)
-                    };
-                    project_panel
-                        .undo_manager
-                        .update(cx, |undo_manager, cx| undo_manager.record([operation]));
-                }
-
                 cx.notify();
+                project_panel.undo_manager.clone()
             })?;
+
+            if new_entry.is_ok() {
+                let operation = if let Some(old_entry) = edited_entry {
+                    Change::Renamed((worktree_id, old_entry.path).into(), new_project_path)
+                } else {
+                    Change::Created(new_project_path)
+                };
+                 // TODO(yara) how fast are undo's happening? is it okay to wait for the mutex here? what if an trash/untrash is taking
+                undo_manager.lock().await.record([operation]);
+            }
 
             match new_entry {
                 Err(e) => {
@@ -2211,13 +2210,17 @@ impl ProjectPanel {
 
     pub fn undo(&mut self, _: &Undo, _window: &mut Window, cx: &mut Context<Self>) {
         cx.spawn(|_, cx| async {
-            TODO(yara, dino)
-            If undo_manager is a gpui entity it gets really annoying to do async functions
-            as we can not hold a borrow of something inside the gpui Context
-            across await points. We want self so instead of putting undo
-            manager into gpui we put it on the heap in an Arc<Mutex>>. So we
-            lock that mutex here and call undo.await
-            self.undo_manager.undo(cx).await;
+            // Undo manager needs to do a lot of mutation on self at various
+            // layers in its _async_ callstack. If it where a gpui entity that
+            // would get quiet annoying since we can not hold a borrow on Self
+            // across await points (if self is coming from the Context).
+            //
+            // Instead of putting undo manager into gpui we put it on the heap
+            // in an Arc<Mutex>>. So we lock that mutex here and get an
+            // reference to an owned Self that can be passed through the entire
+            // async callstack.
+            let manager = self.undo_manager.lock().await();
+            manager.undo().await;
         })
         .detach_and_log_err(cx);
         cx.notify();
@@ -4535,15 +4538,16 @@ impl ProjectPanel {
                     }
                     // update selection
                     if let Some(entry_id) = last_succeed {
+
+                        let undo_manager = project_panel.read_with(cx, |panel, cx| panel.undo_manager.clone())?;
+                        undo_manager.lock().await.record(changes);
+
                         project_panel
                             .update_in(cx, |project_panel, window, cx| {
                                 project_panel.selection = Some(SelectedEntry {
                                     worktree_id,
                                     entry_id,
                                 });
-
-                                project_panel.undo_manager.record(changes);
-
                                 // if only one entry was dragged and it was disambiguated, open the rename editor
                                 if item_count == 1 && disambiguation_range.is_some() {
                                     project_panel.rename_impl(disambiguation_range, window, cx);
@@ -4551,6 +4555,8 @@ impl ProjectPanel {
                             })
                             .ok();
                     }
+
+                    Ok(())
                 })
                 .detach();
                 Some(())
