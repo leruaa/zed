@@ -12,8 +12,6 @@ use ui::{
     ToggleButtonGroupSize, ToggleButtonSimple, ToggleButtonWithIcon, Tooltip, prelude::*,
 };
 use vim_mode_setting::VimModeSetting;
-use workspace::ToggleWorkspaceSidebar;
-use zed_actions::assistant::ToggleFocus as ToggleAgentPanel;
 
 use crate::{
     ImportCursorSettings, ImportVsCodeSettings, SettingsImportState,
