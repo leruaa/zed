@@ -1,4 +1,4 @@
-use std::{fmt, ops::Not as _, time::Duration};
+use std::{fmt, ops::Not as _};
 
 use itertools::Itertools as _;
 use octocrab::models::{
@@ -284,8 +284,6 @@ impl Reporter {
             let review_result = self.check_commit(&commit).await;
 
             report.add(commit, review_result);
-
-            tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
         Ok(report)

@@ -41,6 +41,9 @@ pub struct ComplianceArgs {
     #[arg(long)]
     // The markdown file to write the compliance report to
     report_path: PathBuf,
+
+    #[arg(long)]
+    branch: Option<String>,
 }
 
 impl ComplianceArgs {
@@ -70,10 +73,10 @@ impl ComplianceArgs {
 }
 
 async fn check_compliance_impl(args: ComplianceArgs) -> Result<()> {
-    let in_pr_context = std::env::var("GITHUB_ACTIONS").is_ok_and(|v| v == "true");
+    let in_workflow_context = true || std::env::var("GITHUB_ACTIONS").is_ok_and(|v| v == "true");
     let tag = args.previous_version_tag();
 
-    if !in_pr_context {
+    if !in_workflow_context {
         GitCommand::run(Checkout(args.version_branch()))?;
     }
 
@@ -102,7 +105,7 @@ async fn check_compliance_impl(args: ComplianceArgs) -> Result<()> {
 
     println!("Wrote compliance report to {}", args.report_path.display());
 
-    if !in_pr_context {
+    if !in_workflow_context {
         GitCommand::run(Checkout::previous_branch())?;
     }
 
