@@ -16,9 +16,11 @@ pub enum VectorName {
     AcpGrid,
     AcpLogo,
     AcpLogoSerif,
+    BusinessStamp,
     Grid,
     ProTrialStamp,
     ProUserStamp,
+    StudentStamp,
     ZedLogo,
     ZedXCopilot,
 }
