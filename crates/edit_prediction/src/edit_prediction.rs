@@ -61,6 +61,7 @@ pub mod example_spec;
 pub mod fim;
 mod license_detection;
 pub mod mercury;
+mod metrics;
 pub mod ollama;
 mod onboarding_modal;
 pub mod open_ai_response;
@@ -1676,22 +1677,30 @@ impl EditPredictionStore {
     ) {
         let this = &mut *self;
         let project_state = this.get_or_init_project(project, cx);
-        if let Some(buffer) = project_state
+        let Some(registered_buffer) = project_state
             .registered_buffers
             .get_mut(&edited_buffer.entity_id())
-        {
-            let now = cx.background_executor().now();
-            buffer.pending_predictions.push(PendingSettledPrediction {
+        else {
+            return;
+        };
+        let ts_error_count_before = crate::metrics::ts_error_count_in_range(
+            &edited_buffer_snapshot,
+            editable_offset_range.clone(),
+        );
+        let editable_anchor_range =
+            edited_buffer_snapshot.anchor_range_inside(editable_offset_range);
+        let now = cx.background_executor().now();
+        registered_buffer
+            .pending_predictions
+            .push(PendingSettledPrediction {
                 request_id: request_id,
-                editable_anchor_range: edited_buffer_snapshot
-                    .anchor_range_inside(editable_offset_range),
+                editable_anchor_range,
                 example,
                 e2e_latency,
                 enqueued_at: now,
                 last_edit_at: now,
             });
-            this.settled_predictions_tx.unbounded_send(now).ok();
-        }
+        this.settled_predictions_tx.unbounded_send(now).ok();
     }
 
     fn reject_current_prediction(

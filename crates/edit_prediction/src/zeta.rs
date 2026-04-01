@@ -84,7 +84,6 @@ pub fn request_prediction_with_zeta(
     } else {
         None
     };
-
     let client = store.client.clone();
     let llm_token = store.llm_token.clone();
     let organization_id = store
