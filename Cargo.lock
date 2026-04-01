@@ -9445,7 +9445,6 @@ dependencies = [
  "http_client",
  "language_model",
  "open_ai",
- "release_channel",
  "schemars",
  "semver",
  "serde",
