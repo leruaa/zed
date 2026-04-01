@@ -2553,11 +2553,28 @@ impl Sidebar {
                     let switch_ok = matches!(switch_receiver.await, Ok(Ok(())));
 
                     if !switch_ok {
+                        // The branch may already exist but be checked out in
+                        // another worktree. Attempt to create it in case it
+                        // was deleted; if it already exists, just accept the
+                        // detached HEAD and warn.
                         let create_receiver = worktree_repo.update(cx, |repo, _cx| {
                             repo.create_branch(original_branch.clone(), None)
                         });
-                        if let Ok(result) = create_receiver.await {
-                            result.log_err();
+                        match create_receiver.await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(_)) => {
+                                log::warn!(
+                                    "Could not switch to branch '{original_branch}' — \
+                                     it may be checked out in another worktree. \
+                                     The restored worktree is in detached HEAD state."
+                                );
+                            }
+                            Err(_) => {
+                                log::warn!(
+                                    "Branch creation for '{original_branch}' was canceled; \
+                                     the restored worktree is in detached HEAD state."
+                                );
+                            }
                         }
                     }
                 }
