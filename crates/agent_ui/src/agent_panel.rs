@@ -3833,7 +3833,11 @@ impl AgentPanel {
             return None;
         }
 
-        Some(div().child(self.onboarding.clone()))
+        Some(
+            div()
+                .bg(cx.theme().colors().editor_background)
+                .child(self.onboarding.clone()),
+        )
     }
 
     fn render_trial_end_upsell(

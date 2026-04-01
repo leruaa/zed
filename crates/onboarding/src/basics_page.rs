@@ -12,6 +12,8 @@ use ui::{
     ToggleButtonGroupSize, ToggleButtonSimple, ToggleButtonWithIcon, Tooltip, prelude::*,
 };
 use vim_mode_setting::VimModeSetting;
+use workspace::ToggleWorkspaceSidebar;
+use zed_actions::assistant::ToggleFocus as ToggleAgentPanel;
 
 use crate::{
     ImportCursorSettings, ImportVsCodeSettings, SettingsImportState,
@@ -86,7 +88,7 @@ fn render_theme_section(tab_index: &mut isize, cx: &mut App) -> impl IntoElement
         )
         .child(
             h_flex()
-                .gap_4()
+                .gap_2()
                 .justify_between()
                 .children(render_theme_previews(tab_index, &theme_selection, cx)),
         );
@@ -520,6 +522,92 @@ fn render_import_settings_section(tab_index: &mut isize, cx: &mut App) -> impl I
         .child(h_flex().gap_1().child(vscode).child(cursor))
 }
 
+fn render_ai_section(cx: &mut App) -> impl IntoElement {
+    let agent_button = |icon: IconName, label: SharedString, installed: bool| {
+        let id = format!("{}-id", label);
+
+        v_flex()
+            .id(id)
+            .cursor_pointer()
+            .border_1()
+            .border_color(cx.theme().colors().border_variant)
+            .rounded_sm()
+            .when(!installed, |this| {
+                this.hover(|s| {
+                    s.bg(cx.theme().colors().element_hover)
+                        .border_color(cx.theme().colors().border)
+                })
+            })
+            .child(
+                h_flex()
+                    .px_1()
+                    .py_1p5()
+                    .gap_1()
+                    .items_center()
+                    .justify_center()
+                    .child(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
+                    .child(Label::new(label).size(LabelSize::Small)),
+            )
+            .child(
+                h_flex()
+                    .p_0p5()
+                    .justify_center()
+                    .border_t_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .bg(cx.theme().colors().element_background.opacity(0.5))
+                    .map(|this| {
+                        if installed {
+                            this.child(
+                                h_flex()
+                                    .gap_0p5()
+                                    .child(
+                                        Icon::new(IconName::Check)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Success),
+                                    )
+                                    .child(
+                                        Label::new("Installed")
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Success),
+                                    ),
+                            )
+                        } else {
+                            this.child(
+                                Label::new("Install")
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                        }
+                    }),
+            )
+    };
+
+    v_flex()
+        .gap_2()
+        .child(
+            v_flex().gap_0p5().child(Label::new("Agent Setup")).child(
+                Label::new("Install your favorite agents and start your first thread.")
+                    .color(Color::Muted),
+            ),
+        )
+        .child(
+            div()
+                .w_full()
+                .grid()
+                .grid_cols(5)
+                .gap_2()
+                .child(agent_button(IconName::AiClaude, "Claude".into(), true))
+                .child(agent_button(IconName::AiOpenAi, "Codex".into(), false))
+                .child(agent_button(
+                    IconName::Copilot,
+                    "GitHub Copilot".into(),
+                    false,
+                ))
+                .child(agent_button(IconName::AiOpenCode, "OpenCode".into(), false))
+                .child(agent_button(IconName::EditorCursor, "Cursor".into(), false)),
+        )
+}
+
 pub(crate) fn render_basics_page(cx: &mut App) -> impl IntoElement {
     let mut tab_index = 0;
     v_flex()
@@ -527,6 +615,7 @@ pub(crate) fn render_basics_page(cx: &mut App) -> impl IntoElement {
         .gap_6()
         .child(render_theme_section(&mut tab_index, cx))
         .child(render_base_keymap_section(&mut tab_index, cx))
+        .child(render_ai_section(cx))
         .child(render_import_settings_section(&mut tab_index, cx))
         .child(render_vim_mode_switch(&mut tab_index, cx))
         .child(render_worktree_auto_trust_switch(&mut tab_index, cx))
