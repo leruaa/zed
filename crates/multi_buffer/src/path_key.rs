@@ -607,7 +607,7 @@ impl MultiBuffer {
             DiffChangeKind::BufferEdited,
         );
         if !edits.is_empty() {
-            self.subscriptions.publish(edits);
+            self.publish_edits(edits);
         }
 
         cx.emit(Event::Edited {
@@ -691,7 +691,7 @@ impl MultiBuffer {
         let edits =
             Self::sync_diff_transforms(&mut snapshot, vec![edit], DiffChangeKind::BufferEdited);
         if !edits.is_empty() {
-            self.subscriptions.publish(edits);
+            self.publish_edits(edits);
         }
 
         cx.emit(Event::Edited {
@@ -699,5 +699,22 @@ impl MultiBuffer {
             is_local: true,
         });
         cx.notify();
+    }
+
+    fn publish_edits(&mut self, edits: Vec<Edit<MultiBufferOffset>>) {
+        if cfg!(debug_assertions) {
+            let snapshot = self.snapshot.get_mut();
+            for edit in &edits {
+                if edit.new.start > snapshot.len() || edit.new.end > snapshot.len() {
+                    panic!(
+                        "edit range ({:?}) exceeds snapshot len ({})",
+                        edit.new,
+                        snapshot.len()
+                    );
+                }
+            }
+        }
+
+        self.subscriptions.publish(edits);
     }
 }
