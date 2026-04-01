@@ -387,6 +387,16 @@ impl MultiWorkspace {
             SidebarSide::Right => "right",
         };
         telemetry::event!("Sidebar Toggled", action = "open", side = side);
+        self.apply_open_sidebar(cx);
+    }
+
+    /// Restores the sidebar to open state from persisted session data without
+    /// firing a telemetry event, since this is not a user-initiated action.
+    pub(crate) fn restore_open_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.apply_open_sidebar(cx);
+    }
+
+    fn apply_open_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_open = true;
         let sidebar_focus_handle = self.sidebar.as_ref().map(|s| s.focus_handle(cx));
         for workspace in &self.workspaces {
