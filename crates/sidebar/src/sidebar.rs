@@ -3068,9 +3068,11 @@ impl Sidebar {
 
         let store = cx.update(|_window, cx| ThreadMetadataStore::global(cx))?;
 
-        // Re-check inside the async block to close the TOCTOU window:
+        // Re-check inside the async block to narrow the TOCTOU window:
         // another thread on the same worktree may have been un-archived
         // (or a new one created) between the synchronous check and here.
+        // Note: this does not fully close the race — state can still change
+        // at subsequent await points during the commit/archive sequence.
         let still_last_thread = store.update(cx, |store, _cx| {
             !store
                 .entries_for_path(&folder_paths)
