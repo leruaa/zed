@@ -64,11 +64,13 @@ impl ComplianceArgs {
     }
 
     fn version_branch(&self) -> String {
-        format!(
-            "v{major}.{minor}.x",
-            major = self.version.major,
-            minor = self.version.minor
-        )
+        self.branch.clone().unwrap_or_else(|| {
+            format!(
+                "v{major}.{minor}.x",
+                major = self.version.major,
+                minor = self.version.minor
+            )
+        })
     }
 }
 
