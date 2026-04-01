@@ -2048,7 +2048,7 @@ fn merge_ranges(ranges: &mut Vec<Range<Anchor>>, buffer: &MultiBufferSnapshot) {
 pub mod evals {
     use crate::InlineAssistant;
     use agent::ThreadStore;
-    use client::{Client, UserStore};
+    use client::{Client, RefreshLlmTokenListener, UserStore};
     use editor::{Editor, MultiBuffer, MultiBufferOffset};
     use eval_utils::{EvalOutput, NoProcessor};
     use fs::FakeFs;
