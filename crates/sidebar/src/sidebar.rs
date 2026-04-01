@@ -3051,9 +3051,15 @@ impl Sidebar {
             });
             async move {
                 match reset_receiver.await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(err)) => log::error!("Failed to undo WIP commits: {err}"),
-                    Err(_) => log::error!("WIP commit undo was canceled"),
+                    Ok(Ok(())) => true,
+                    Ok(Err(err)) => {
+                        log::error!("Failed to undo WIP commits: {err}");
+                        false
+                    }
+                    Err(_) => {
+                        log::error!("WIP commit undo was canceled");
+                        false
+                    }
                 }
             }
         };
@@ -3226,16 +3232,22 @@ impl Sidebar {
                         Ok(Ok(Some(_))) => unreachable!(),
                     };
                     log::error!("{reason} after WIP commits; attempting to undo");
-                    undo_wip_commits(cx).await;
+                    let undo_ok = undo_wip_commits(cx).await;
                     unarchive(cx);
+                    let detail = if undo_ok {
+                        "Could not read the commit hash after creating \
+                         the WIP commit. The commit has been undone and \
+                         the thread has been restored to the sidebar."
+                    } else {
+                        "Could not read the commit hash after creating \
+                         the WIP commit. The commit could not be automatically \
+                         undone \u{2014} you may need to manually run `git reset HEAD~2` \
+                         on the worktree. The thread has been restored to the sidebar."
+                    };
                     cx.prompt(
                         PromptLevel::Warning,
                         "Failed to archive worktree",
-                        Some(
-                            "Could not read the commit hash after creating \
-                             the WIP commit. The commit has been undone and \
-                             the thread has been restored to the sidebar.",
-                        ),
+                        Some(detail),
                         &["OK"],
                     )
                     .await
@@ -3277,16 +3289,22 @@ impl Sidebar {
                 }
                 Err(err) => {
                     log::error!("Failed to create archived worktree record: {err}");
-                    undo_wip_commits(cx).await;
+                    let undo_ok = undo_wip_commits(cx).await;
                     unarchive(cx);
+                    let detail = if undo_ok {
+                        "Could not save the archived worktree record. \
+                         The WIP commit has been undone and the thread \
+                         has been restored to the sidebar."
+                    } else {
+                        "Could not save the archived worktree record. \
+                         The WIP commit could not be automatically \
+                         undone \u{2014} you may need to manually run `git reset HEAD~2` \
+                         on the worktree. The thread has been restored to the sidebar."
+                    };
                     cx.prompt(
                         PromptLevel::Warning,
                         "Failed to archive worktree",
-                        Some(
-                            "Could not save the archived worktree record. \
-                             The WIP commit has been undone and the thread \
-                             has been restored to the sidebar.",
-                        ),
+                        Some(detail),
                         &["OK"],
                     )
                     .await
@@ -3357,9 +3375,11 @@ impl Sidebar {
         };
 
         if !dir_removed {
-            if commit_ok {
-                undo_wip_commits(cx).await;
-            }
+            let undo_ok = if commit_ok {
+                undo_wip_commits(cx).await
+            } else {
+                true
+            };
             if let Some(row_id) = archived_row_id {
                 if let Some(main_repo) = &main_repo {
                     let ref_name = format!("refs/archived-worktrees/{row_id}");
@@ -3374,14 +3394,21 @@ impl Sidebar {
                     .log_err();
             }
             unarchive(cx);
+            let detail = if undo_ok {
+                "Could not remove the worktree directory from disk. \
+                 Any WIP commits and archive records have been rolled \
+                 back, and the thread has been restored to the sidebar."
+            } else {
+                "Could not remove the worktree directory from disk. \
+                 The archive records have been rolled back, but the WIP \
+                 commits could not be automatically undone \u{2014} you may need \
+                 to manually run `git reset HEAD~2` on the worktree. \
+                 The thread has been restored to the sidebar."
+            };
             cx.prompt(
                 PromptLevel::Warning,
                 "Failed to delete worktree",
-                Some(
-                    "Could not remove the worktree directory from disk. \
-                     Any WIP commits and archive records have been rolled \
-                     back, and the thread has been restored to the sidebar.",
-                ),
+                Some(detail),
                 &["OK"],
             )
             .await
