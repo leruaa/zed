@@ -98,10 +98,11 @@ async fn check_compliance_impl(args: ComplianceArgs) -> Result<()> {
     let report = Reporter::new(commits, client).generate_report().await?;
 
     let summary = report.summary();
+    let report_path = args.report_path.with_extension("md");
 
-    report.write_markdown(&args.report_path)?;
+    report.write_markdown(&report_path)?;
 
-    println!("Wrote compliance report to {}", args.report_path.display());
+    println!("Wrote compliance report to {}", report_path.display());
 
     if !in_workflow_context {
         GitCommand::run(Checkout::previous_branch())?;

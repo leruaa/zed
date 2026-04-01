@@ -111,6 +111,10 @@ impl ReportSummary {
             _ => ReportReviewSummary::MissingReviewsWithErrors,
         }
     }
+
+    fn has_errors(&self) -> bool {
+        self.errors > 0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Display, PartialEq, Eq, PartialOrd, Ord)]
@@ -174,7 +178,7 @@ impl Report {
 
         issues.sort_by_key(|entry| entry.issue_kind());
 
-        let file = File::create(path.with_extension("md"))
+        let file = File::create(path)
             .with_context(|| format!("Failed to create markdown report at {}", path.display()))?;
         let mut writer = BufWriter::new(file);
 
@@ -185,10 +189,12 @@ impl Report {
         writeln!(writer, "- PRs: {}", summary.pull_requests)?;
         writeln!(writer, "- Reviewed: {}", summary.reviewed)?;
         writeln!(writer, "- Not reviewed: {}", summary.not_reviewed)?;
-        writeln!(writer, "- Errors: {}", summary.errors)?;
+        if summary.has_errors() {
+            writeln!(writer, "- Errors: {}", summary.errors)?;
+        }
         writeln!(writer)?;
 
-        write_issue_table(&mut writer, &issues)?;
+        write_issue_table(&mut writer, &issues, &summary)?;
         write_success_table(&mut writer, &successes)?;
 
         writer
@@ -200,12 +206,21 @@ impl Report {
 fn write_issue_table(
     writer: &mut impl Write,
     issues: &[ReportEntry<ReviewFailure>],
+    summary: &ReportSummary,
 ) -> std::io::Result<()> {
-    writeln!(writer, "## Errors and unreviewed commits")?;
+    if summary.has_errors() {
+        writeln!(writer, "## Errors and unreviewed commits")?;
+    } else {
+        writeln!(writer, "## Unreviewed commits")?;
+    }
     writeln!(writer)?;
 
     if issues.is_empty() {
-        writeln!(writer, "No errors or unreviewed commits found.")?;
+        if summary.has_errors() {
+            writeln!(writer, "No errors or unreviewed commits found.")?;
+        } else {
+            writeln!(writer, "No unreviewed commits found.")?;
+        }
         writeln!(writer)?;
         return Ok(());
     }
