@@ -258,8 +258,9 @@ impl GitRepository for FakeGitRepository {
             state.commit_history.truncate(target_index + 1);
             let snapshot = state
                 .commit_history
-                .pop()
-                .expect("pop_count validated above");
+                .last()
+                .expect("pop_count validated above")
+                .clone();
 
             match mode {
                 ResetMode::Soft => {
@@ -784,11 +785,15 @@ impl GitRepository for FakeGitRepository {
         &self,
         _message: gpui::SharedString,
         _name_and_email: Option<(gpui::SharedString, gpui::SharedString)>,
-        _options: CommitOptions,
+        options: CommitOptions,
         _askpass: AskPassDelegate,
         _env: Arc<HashMap<String, String>>,
     ) -> BoxFuture<'_, Result<()>> {
         self.with_state_async(true, move |state| {
+            if !options.allow_empty && state.index_contents == state.head_contents {
+                anyhow::bail!("nothing to commit (use allow_empty to create an empty commit)");
+            }
+
             let old_sha = state.refs.get("HEAD").cloned().unwrap_or_default();
             state.commit_history.push(FakeCommitSnapshot {
                 head_contents: state.head_contents.clone(),
