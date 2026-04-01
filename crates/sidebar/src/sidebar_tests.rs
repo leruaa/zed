@@ -192,12 +192,12 @@ fn visible_entries_as_strings(
                 };
                 match entry {
                     ListEntry::ProjectHeader {
+                        key,
                         label,
-                        path_list,
                         highlight_positions: _,
                         ..
                     } => {
-                        let icon = if sidebar.collapsed_groups.contains(path_list) {
+                        let icon = if sidebar.collapsed_groups.contains(key.path_list()) {
                             ">"
                         } else {
                             "v"
@@ -685,9 +685,8 @@ async fn test_visible_entries_as_strings(cx: &mut TestAppContext) {
         s.contents.entries = vec![
             // Expanded project header
             ListEntry::ProjectHeader {
-                path_list: expanded_path.clone(),
+                key: workspace::ProjectGroupKey::from_paths(expanded_path.paths(), None),
                 label: "expanded-project".into(),
-                workspace: workspace.clone(),
                 highlight_positions: Vec::new(),
                 has_running_threads: false,
                 waiting_thread_count: 0,
@@ -814,9 +813,8 @@ async fn test_visible_entries_as_strings(cx: &mut TestAppContext) {
             },
             // Collapsed project header
             ListEntry::ProjectHeader {
-                path_list: collapsed_path.clone(),
+                key: workspace::ProjectGroupKey::from_paths(collapsed_path.paths(), None),
                 label: "collapsed-project".into(),
-                workspace: workspace.clone(),
                 highlight_positions: Vec::new(),
                 has_running_threads: false,
                 waiting_thread_count: 0,
@@ -5149,7 +5147,7 @@ mod property_test {
                 .entries
                 .iter()
                 .filter_map(|entry| match entry {
-                    ListEntry::ProjectHeader { path_list, .. } => Some(path_list.clone()),
+                    ListEntry::ProjectHeader { key, .. } => Some(key.path_list().clone()),
                     _ => None,
                 })
                 .collect();

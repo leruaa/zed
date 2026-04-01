@@ -1027,6 +1027,47 @@ impl MultiWorkspace {
         });
     }
 
+    pub fn move_group_to_new_window(
+        &mut self,
+        key: ProjectGroupKey,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(group_ix) = self.project_groups.iter().position(|g| g.key == key) else {
+            return;
+        };
+
+        let group_workspaces: Vec<_> = self.project_groups[group_ix].workspaces.clone();
+        if group_workspaces.is_empty() {
+            return;
+        }
+
+        self.remove_group_at_index(group_ix, window, cx);
+
+        let app_state: Arc<crate::AppState> = group_workspaces[0].read(cx).app_state().clone();
+
+        cx.defer(move |cx| {
+            let options = (app_state.build_window_options)(None, cx);
+
+            let first_workspace = group_workspaces[0].clone();
+            let remaining: Vec<_> = group_workspaces.into_iter().skip(1).collect();
+            let Ok(window_handle) = cx.open_window(options, |window, cx| {
+                cx.new(|cx| MultiWorkspace::new(first_workspace, window, cx))
+            }) else {
+                return;
+            };
+
+            window_handle
+                .update(cx, |multi_workspace, window, cx| {
+                    for workspace in remaining {
+                        multi_workspace.add(workspace, &*window, cx);
+                    }
+                    window.activate_window();
+                })
+                .ok();
+        });
+    }
+
     fn move_active_workspace_to_new_window(
         &mut self,
         _: &MoveWorkspaceToNewWindow,
