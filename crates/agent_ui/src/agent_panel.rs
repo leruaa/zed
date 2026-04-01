@@ -45,7 +45,7 @@ use crate::{
 use crate::{ExpandMessageEditor, ThreadHistoryView};
 use crate::{ManageProfiles, ThreadHistoryViewEvent};
 use crate::{ThreadHistory, agent_connection_store::AgentConnectionStore};
-use agent_settings::AgentSettings;
+use agent_settings::{AgentSettings, WindowLayout};
 use ai_onboarding::AgentPanelOnboarding;
 use anyhow::{Context as _, Result, anyhow};
 use client::UserStore;
@@ -912,7 +912,7 @@ impl AgentPanel {
 
         let weak_panel = cx.entity().downgrade();
         let onboarding = cx.new(|cx| {
-            AgentPanelOnboarding::new(
+            let mut onboarding = AgentPanelOnboarding::new(
                 user_store.clone(),
                 client,
                 move |_window, cx| {
@@ -926,7 +926,14 @@ impl AgentPanel {
                     OnboardingUpsell::set_dismissed(true, cx);
                 },
                 cx,
-            )
+            );
+            onboarding.set_use_agent_layout({
+                let fs = fs.clone();
+                move |_window, cx| {
+                    AgentSettings::set_layout(WindowLayout::agent(), fs.clone(), cx);
+                }
+            });
+            onboarding
         });
 
         // Subscribe to extension events to sync agent servers when extensions change
