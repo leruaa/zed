@@ -520,94 +520,112 @@ fn render_import_settings_section(tab_index: &mut isize, cx: &mut App) -> impl I
         .child(h_flex().gap_1().child(vscode).child(cursor))
 }
 
-fn render_ai_section(cx: &mut App) -> impl IntoElement {
-    let agent_button = |icon: IconName, label: SharedString, installed: bool| {
-        let id = format!("{}-id", label);
-
-        v_flex()
-            .id(id)
-            .cursor_pointer()
-            .border_1()
-            .border_color(cx.theme().colors().border_variant)
-            .rounded_sm()
-            .when(!installed, |this| {
-                this.hover(|s| {
-                    s.bg(cx.theme().colors().element_hover)
-                        .border_color(cx.theme().colors().border)
-                })
-            })
-            .child(
-                h_flex()
-                    .px_1()
-                    .py_1p5()
-                    .gap_1()
-                    .items_center()
-                    .justify_center()
-                    .child(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
-                    .child(Label::new(label).size(LabelSize::Small)),
-            )
-            .child(
-                h_flex()
-                    .p_0p5()
-                    .justify_center()
-                    .border_t_1()
-                    .border_color(cx.theme().colors().border_variant)
-                    .bg(cx.theme().colors().element_background.opacity(0.5))
-                    .map(|this| {
-                        if installed {
-                            this.child(
-                                h_flex()
-                                    .gap_0p5()
-                                    .child(
-                                        Icon::new(IconName::Check)
-                                            .size(IconSize::XSmall)
-                                            .color(Color::Success),
-                                    )
-                                    .child(
-                                        Label::new("Installed")
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Success),
-                                    ),
-                            )
-                        } else {
-                            this.child(
-                                Label::new("Install")
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted),
-                            )
-                        }
-                    }),
-            )
-    };
+fn render_agent_button(
+    icon: IconName,
+    label: SharedString,
+    installed: bool,
+    cx: &mut App,
+) -> impl IntoElement {
+    let id = format!("{}-id", label);
 
     v_flex()
-        .gap_2()
+        .id(id)
+        .border_1()
+        .border_color(cx.theme().colors().border_variant)
+        .rounded_sm()
+        .when(!installed, |this| {
+            this.cursor_pointer().hover(|s| {
+                s.bg(cx.theme().colors().element_hover)
+                    .border_color(cx.theme().colors().border)
+            })
+        })
         .child(
-            v_flex().gap_0p5().child(Label::new("Agent Setup")).child(
-                Label::new("Install your favorite agents and start your first thread.")
-                    .color(Color::Muted),
-            ),
+            h_flex()
+                .px_1()
+                .py_1p5()
+                .gap_1()
+                .items_center()
+                .justify_center()
+                .child(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
+                .child(Label::new(label).size(LabelSize::Small)),
+        )
+        .child(
+            h_flex()
+                .p_0p5()
+                .h_full()
+                .justify_center()
+                .border_t_1()
+                .border_color(cx.theme().colors().border_variant)
+                .bg(cx.theme().colors().element_background.opacity(0.5))
+                .map(|this| {
+                    if installed {
+                        this.child(
+                            Icon::new(IconName::Check)
+                                .size(IconSize::Small)
+                                .color(Color::Success),
+                        )
+                    } else {
+                        this.child(
+                            Label::new("Install")
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        )
+                    }
+                }),
+        )
+}
+
+fn render_ai_section(cx: &mut App) -> impl IntoElement {
+    v_flex()
+        .gap_0p5()
+        .child(Label::new("Agent Setup"))
+        .child(
+            Label::new("Install your favorite agents and start your first thread.")
+                .color(Color::Muted),
         )
         .child(
             div()
                 .w_full()
+                .mt_1p5()
                 .grid()
                 .grid_cols(5)
                 .gap_2()
-                .child(agent_button(IconName::ZedAgent, "Zed".into(), false))
-                .child(agent_button(IconName::AiClaude, "Claude".into(), true))
-                .child(agent_button(IconName::AiOpenAi, "Codex".into(), false))
-                .child(agent_button(
+                .child(render_agent_button(
+                    IconName::ZedAgent,
+                    "Zed".into(),
+                    false,
+                    cx,
+                ))
+                .child(render_agent_button(
+                    IconName::AiClaude,
+                    "Claude".into(),
+                    true,
+                    cx,
+                ))
+                .child(render_agent_button(
+                    IconName::AiOpenAi,
+                    "Codex".into(),
+                    true,
+                    cx,
+                ))
+                .child(render_agent_button(
                     IconName::Copilot,
                     "GitHub Copilot".into(),
                     false,
+                    cx,
                 ))
-                .child(agent_button(IconName::EditorCursor, "Cursor".into(), false)),
+                .child(render_agent_button(
+                    IconName::EditorCursor,
+                    "Cursor".into(),
+                    false,
+                    cx,
+                )),
         )
 }
 
 pub(crate) fn render_basics_page(cx: &mut App) -> impl IntoElement {
     let mut tab_index = 0;
+
     v_flex()
         .id("basics-page")
         .gap_6()
