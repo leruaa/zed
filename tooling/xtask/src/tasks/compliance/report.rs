@@ -106,9 +106,9 @@ impl ReportSummary {
 
     pub fn review_summary(&self) -> ReportReviewSummary {
         match self.not_reviewed {
-            0 if self.errors == 0 => ReportReviewSummary::MissingReviews,
-            0 if self.errors > 0 => ReportReviewSummary::MissingReviewsWithErrors,
-            _ => ReportReviewSummary::NoIssuesFound,
+            0 if self.errors == 0 => ReportReviewSummary::NoIssuesFound,
+            1.. if self.errors == 0 => ReportReviewSummary::MissingReviews,
+            _ => ReportReviewSummary::MissingReviewsWithErrors,
         }
     }
 }
