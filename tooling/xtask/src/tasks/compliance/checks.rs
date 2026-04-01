@@ -108,11 +108,38 @@ impl Reporter {
         }
     }
 
+    /// Method that checks every commit for compliance
     async fn check_commit(
         &mut self,
         commit: &CommitDetails,
     ) -> Result<ReviewSuccess, ReviewFailure> {
-        // Check co-authors first
+        let Some(pr_number) = commit.pr_number() else {
+            return Err(ReviewFailure::NoPullRequestFound);
+        };
+
+        if let Some(approval) = self.check_pull_request_approved(pr_number).await? {
+            return Ok(approval);
+        }
+
+        if let Some(approval) = self.check_approving_pull_request_comment(pr_number).await? {
+            return Ok(approval);
+        }
+
+        if let Some(approval) = self.check_commit_co_authors(commit).await? {
+            return Ok(approval);
+        }
+
+        // if let Some(approval) = self.check_external_merged_pr(pr_number).await? {
+        //     return Ok(approval);
+        // }
+
+        Err(ReviewFailure::Unreviewed)
+    }
+
+    async fn check_commit_co_authors(
+        &mut self,
+        commit: &CommitDetails,
+    ) -> Result<Option<ReviewSuccess>, ReviewFailure> {
         if commit.co_authors().is_some()
             && let Some(commit_authors) = self
                 .github_client
@@ -133,15 +160,20 @@ impl Reporter {
                 }
             }
 
-            if org_co_authors.is_empty().not() {
-                return Ok(ReviewSuccess::CoAuthored(org_co_authors));
-            }
+            Ok(org_co_authors
+                .is_empty()
+                .not()
+                .then_some(ReviewSuccess::CoAuthored(org_co_authors)))
+        } else {
+            Ok(None)
         }
+    }
 
-        let Some(pr_number) = commit.pr_number() else {
-            return Err(ReviewFailure::NoPullRequestFound);
-        };
-
+    #[allow(unused)]
+    async fn check_external_merged_pr(
+        &mut self,
+        pr_number: u64,
+    ) -> Result<Option<ReviewSuccess>, ReviewFailure> {
         let pull_request = self.github_client.get_pull_request(pr_number).await?;
 
         if let Some(user) = pull_request.user
@@ -151,22 +183,32 @@ impl Reporter {
                 .await?
                 .not()
         {
-            if let Some(merged_by) = pull_request.merged_by {
-                return Ok(ReviewSuccess::ExternalMergedContribution { merged_by });
-            } else {
-                return Err(ReviewFailure::UnableToDetermineReviewer);
-            }
+            pull_request.merged_by.map_or(
+                Err(ReviewFailure::UnableToDetermineReviewer),
+                |merged_by| {
+                    Ok(Some(ReviewSuccess::ExternalMergedContribution {
+                        merged_by,
+                    }))
+                },
+            )
+        } else {
+            Ok(None)
         }
+    }
 
-        let other_comments = self
+    async fn check_pull_request_approved(
+        &mut self,
+        pr_number: u64,
+    ) -> Result<Option<ReviewSuccess>, ReviewFailure> {
+        let pr_reviews = self
             .github_client
             .get_pr_reviews(pr_number)
             .await?
             .take_items();
 
-        if !other_comments.is_empty() {
+        if !pr_reviews.is_empty() {
             let mut org_approving_reviews = Vec::new();
-            for review in other_comments {
+            for review in pr_reviews {
                 if let Some(github_login) = review.user.as_ref()
                     && review
                         .state
@@ -180,11 +222,19 @@ impl Reporter {
                 }
             }
 
-            if org_approving_reviews.is_empty().not() {
-                return Ok(ReviewSuccess::PullRequestReviewed(org_approving_reviews));
-            }
+            Ok(org_approving_reviews
+                .is_empty()
+                .not()
+                .then_some(ReviewSuccess::PullRequestReviewed(org_approving_reviews)))
+        } else {
+            Ok(None)
         }
+    }
 
+    async fn check_approving_pull_request_comment(
+        &mut self,
+        pr_number: u64,
+    ) -> Result<Option<ReviewSuccess>, ReviewFailure> {
         let other_comments = self
             .github_client
             .get_pr_comments(pr_number)
@@ -208,12 +258,13 @@ impl Reporter {
                 }
             }
 
-            if org_approving_comments.is_empty().not() {
-                return Ok(ReviewSuccess::ApprovingComment(org_approving_comments));
-            }
+            Ok(org_approving_comments
+                .is_empty()
+                .not()
+                .then_some(ReviewSuccess::ApprovingComment(org_approving_comments)))
+        } else {
+            Ok(None)
         }
-
-        Err(ReviewFailure::Unreviewed)
     }
 
     pub(crate) async fn generate_report(&mut self) -> anyhow::Result<Report> {

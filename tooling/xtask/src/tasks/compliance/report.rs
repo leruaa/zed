@@ -69,7 +69,7 @@ impl ReportEntry<ReviewSuccess> {
 pub struct ReportSummary {
     pull_requests: usize,
     reviewed: usize,
-    not_reviewed: usize,
+    pub(crate) not_reviewed: usize,
     pub(crate) errors: usize,
 }
 
@@ -98,8 +98,12 @@ impl ReportSummary {
         }
     }
 
-    pub fn no_issues(&self) -> bool {
-        self.errors == 0
+    pub fn every_commit_reviewed(&self) -> bool {
+        self.not_reviewed == 0 && self.errors == 0
+    }
+
+    pub fn commits_reviewed_with_errors(&self) -> bool {
+        self.not_reviewed == 0 && self.errors > 0
     }
 }
 
@@ -164,7 +168,7 @@ impl Report {
 
         issues.sort_by_key(|entry| entry.issue_kind());
 
-        let file = File::create(path)
+        let file = File::create(path.with_extension("md"))
             .with_context(|| format!("Failed to create markdown report at {}", path.display()))?;
         let mut writer = BufWriter::new(file);
 

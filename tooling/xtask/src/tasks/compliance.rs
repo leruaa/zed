@@ -6,7 +6,7 @@ use semver::Version;
 
 use crate::tasks::compliance::{
     checks::Reporter,
-    git::{CommitsBetweenCommits, GitCommand, VersionTag},
+    git::{Checkout, CommitsFromVersionToHead, GitCommand, VersionTag},
     github::GitHubClient,
 };
 
@@ -16,7 +16,7 @@ mod github;
 mod report;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-enum ReleaseChannel {
+pub(crate) enum ReleaseChannel {
     Stable,
     Preview,
 }
@@ -38,18 +38,26 @@ pub struct ComplianceArgs {
     #[arg(value_enum, default_value_t = ReleaseChannel::Stable)]
     // The release channel to check compliance for
     release_channel: ReleaseChannel,
-    #[arg(long, default_value = "compliance-report.md")]
+    #[arg(long)]
     // The markdown file to write the compliance report to
     report_path: PathBuf,
 }
 
 impl ComplianceArgs {
+    #[allow(dead_code)]
     pub(crate) fn version_tag(&self) -> VersionTag {
-        VersionTag(format!(
-            "v{version}{channel_suffix}",
-            version = self.version,
-            channel_suffix = self.release_channel.tag_suffix()
-        ))
+        VersionTag::new(&self.version, self.release_channel)
+    }
+
+    pub(crate) fn previous_version_tag(&self) -> VersionTag {
+        // TODO make this more robust
+        let previous_version = Version::new(
+            self.version.major,
+            self.version.minor - 1,
+            self.version.patch,
+        );
+
+        VersionTag::new(&previous_version, self.release_channel)
     }
 
     fn version_branch(&self) -> String {
@@ -62,25 +70,29 @@ impl ComplianceArgs {
 }
 
 async fn check_compliance_impl(args: ComplianceArgs) -> Result<()> {
-    let tag = args.version_tag();
+    let in_pr_context = std::env::var("GITHUB_ACTIONS").is_ok_and(|v| v == "true");
+    let tag = args.previous_version_tag();
+
+    if !in_pr_context {
+        GitCommand::run(Checkout(args.version_branch()))?;
+    }
 
     println!("Checking compliance for version: {}", tag.0);
 
-    let mut commits = GitCommand::new(CommitsBetweenCommits(tag.clone())).run()?;
-
-    //TODO REMOVE REMOVE REMOVE REMOVE!
-    let _ = commits.split_off(60);
+    let commits = GitCommand::run(CommitsFromVersionToHead(tag.clone()))?;
 
     println!("Found {} commits to check", commits.len());
 
-    // let app_id = std::env::var("GITHUB_APP_ID").context("Missing GITHUB_APP_ID")?;
-    // let key = std::env::var("GITHUB_APP_KEY").context("Missing GITHUB_APP_KEY")?;
-    // let key = std::fs::read_to_string("zed-zippy-development.2026-03-30.private-key.pem")?;
-    const APP_ID: u64 = 2008959;
-    let key = std::fs::read_to_string("zed-zippy.2026-03-30.private-key.pem")?;
-    let client = GitHubClient::for_app(APP_ID, key.as_ref()).await?;
+    let app_id = std::env::var("GITHUB_APP_ID").context("Missing GITHUB_APP_ID")?;
+    let key = std::env::var("GITHUB_APP_KEY").context("Missing GITHUB_APP_KEY")?;
 
-    println!("Initialized GitHub client for app ID {APP_ID}");
+    let client = GitHubClient::for_app(
+        app_id.parse().context("Failed to parse app ID as int")?,
+        key.as_ref(),
+    )
+    .await?;
+
+    println!("Initialized GitHub client for app ID {app_id}");
 
     let report = Reporter::new(commits, client).generate_report().await?;
 
@@ -90,15 +102,25 @@ async fn check_compliance_impl(args: ComplianceArgs) -> Result<()> {
 
     println!("Wrote compliance report to {}", args.report_path.display());
 
-    if summary.no_issues() {
+    if !in_pr_context {
+        GitCommand::run(Checkout::previous_branch())?;
+    }
+
+    if summary.every_commit_reviewed() {
         println!("No issues found, compliance check passed.");
-        return Ok(());
-    } else {
+        Ok(())
+    } else if summary.commits_reviewed_with_errors() {
         println!("Issues found, compliance check failed.");
-        return Err(anyhow::anyhow!(
-            "Compliance check failed with {} issues",
+        Err(anyhow::anyhow!(
+            "Compliance check failed with {} unreviewed commits and {} other issues",
+            summary.not_reviewed,
             summary.errors
-        ));
+        ))
+    } else {
+        Err(anyhow::anyhow!(
+            "Compliance check failed, found {} commits not reviewed",
+            summary.not_reviewed
+        ))
     }
 }
 
