@@ -1,8 +1,6 @@
 use crate::{StoredEvent, example_spec::ExampleSpec};
 use anyhow::Result;
 use buffer_diff::BufferDiffSnapshot;
-#[cfg(test)]
-use client::RefreshLlmTokenListener;
 use collections::HashMap;
 use gpui::{App, Entity, Task};
 use language::Buffer;
@@ -260,6 +258,7 @@ fn generate_timestamp_name() -> String {
 mod tests {
     use super::*;
     use crate::EditPredictionStore;
+    use client::RefreshLlmTokenListener;
     use client::{Client, UserStore};
     use clock::FakeSystemClock;
     use gpui::{AppContext as _, TestAppContext, http_client::FakeHttpClient};

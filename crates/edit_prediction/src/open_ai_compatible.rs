@@ -5,7 +5,6 @@ use gpui::{App, AppContext as _, Entity, Global, SharedString, Task, http_client
 use language::language_settings::{OpenAiCompatibleEditPredictionSettings, all_language_settings};
 use language_model::{ApiKeyState, EnvVar, env_var};
 use std::sync::Arc;
-use zed_credentials_provider::global as global_credentials_provider;
 
 pub fn open_ai_compatible_api_url(cx: &App) -> SharedString {
     all_language_settings(None, cx)
@@ -43,7 +42,7 @@ pub fn open_ai_compatible_api_token(cx: &mut App) -> Entity<ApiKeyState> {
 pub fn load_open_ai_compatible_api_token(
     cx: &mut App,
 ) -> Task<Result<(), language_model::AuthenticateError>> {
-    let credentials_provider = global_credentials_provider(cx);
+    let credentials_provider = zed_credentials_provider::global(cx);
     let api_url = open_ai_compatible_api_url(cx);
     open_ai_compatible_api_token(cx).update(cx, |key_state, cx| {
         key_state.load_if_needed(api_url, |s| s, credentials_provider, cx)

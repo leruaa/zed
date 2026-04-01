@@ -1,8 +1,5 @@
 use anyhow::Result;
-use client::{
-    Client, EditPredictionUsage, NeedsLlmTokenRefresh, UserStore,
-    global_llm_token as global_llm_api_token,
-};
+use client::{Client, EditPredictionUsage, NeedsLlmTokenRefresh, UserStore, global_llm_token};
 use cloud_api_types::{OrganizationId, SubmitEditPredictionFeedbackBody};
 use cloud_llm_client::predict_edits_v3::{
     PredictEditsV3Request, PredictEditsV3Response, RawCompletionRequest, RawCompletionResponse,
@@ -751,7 +748,7 @@ impl EditPredictionStore {
     pub fn new(client: Arc<Client>, user_store: Entity<UserStore>, cx: &mut Context<Self>) -> Self {
         let data_collection_choice = Self::load_data_collection_choice(cx);
 
-        let llm_token = global_llm_api_token(cx);
+        let llm_token = global_llm_token(cx);
 
         let (reject_tx, reject_rx) = mpsc::unbounded();
         cx.background_spawn({

@@ -16,7 +16,6 @@ use language_model::{ApiKeyState, EnvVar, env_var};
 use release_channel::AppVersion;
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Range, path::Path, sync::Arc};
-use zed_credentials_provider::global as global_credentials_provider;
 use zeta_prompt::ZetaPromptInput;
 
 const MERCURY_API_URL: &str = "https://api.inceptionlabs.ai/v1/edit/completions";
@@ -390,7 +389,7 @@ pub fn mercury_api_token(cx: &mut App) -> Entity<ApiKeyState> {
 }
 
 pub fn load_mercury_api_token(cx: &mut App) -> Task<Result<(), language_model::AuthenticateError>> {
-    let credentials_provider = global_credentials_provider(cx);
+    let credentials_provider = zed_credentials_provider::global(cx);
     mercury_api_token(cx).update(cx, |key_state, cx| {
         key_state.load_if_needed(MERCURY_CREDENTIALS_URL, |s| s, credentials_provider, cx)
     })

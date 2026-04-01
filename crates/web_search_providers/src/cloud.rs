@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use client::{Client, NeedsLlmTokenRefresh, UserStore, global_llm_token as global_llm_api_token};
+use client::{Client, NeedsLlmTokenRefresh, UserStore, global_llm_token};
 use cloud_api_types::OrganizationId;
 use cloud_llm_client::{WebSearchBody, WebSearchResponse};
 use futures::AsyncReadExt as _;
@@ -30,7 +30,7 @@ pub struct State {
 
 impl State {
     pub fn new(client: Arc<Client>, user_store: Entity<UserStore>, cx: &mut Context<Self>) -> Self {
-        let llm_api_token = global_llm_api_token(cx);
+        let llm_api_token = global_llm_token(cx);
 
         Self {
             client,

@@ -11,7 +11,6 @@ use language::language_settings::AllLanguageSettings;
 use settings::Settings as _;
 use ui::{ButtonLink, ConfiguredApiCard, ContextMenu, DropdownMenu, DropdownStyle, prelude::*};
 use workspace::AppState;
-use zed_credentials_provider::global as global_credentials_provider;
 
 const OLLAMA_API_URL_PLACEHOLDER: &str = "http://localhost:11434";
 const OLLAMA_MODEL_PLACEHOLDER: &str = "qwen2.5-coder:3b-base";
@@ -186,7 +185,7 @@ fn render_api_key_provider(
     cx: &mut Context<SettingsWindow>,
 ) -> impl IntoElement {
     let weak_page = cx.weak_entity();
-    let credentials_provider = global_credentials_provider(cx);
+    let credentials_provider = zed_credentials_provider::global(cx);
     _ = window.use_keyed_state(current_url(cx), cx, |_, cx| {
         let task = api_key_state.update(cx, |key_state, cx| {
             key_state.load_if_needed(
@@ -215,7 +214,7 @@ fn render_api_key_provider(
     });
 
     let write_key = move |api_key: Option<String>, cx: &mut App| {
-        let credentials_provider = global_credentials_provider(cx);
+        let credentials_provider = zed_credentials_provider::global(cx);
         api_key_state
             .update(cx, |key_state, cx| {
                 let url = current_url(cx);

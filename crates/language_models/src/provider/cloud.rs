@@ -2,8 +2,7 @@ use ai_onboarding::YoungAccountBanner;
 use anthropic::AnthropicModelMode;
 use anyhow::{Context as _, Result, anyhow};
 use client::{
-    Client, NeedsLlmTokenRefresh, RefreshLlmTokenListener, UserStore,
-    global_llm_token as global_llm_api_token, zed_urls,
+    Client, NeedsLlmTokenRefresh, RefreshLlmTokenListener, UserStore, global_llm_token, zed_urls,
 };
 use cloud_api_types::{OrganizationId, Plan};
 use cloud_llm_client::{
@@ -113,7 +112,7 @@ impl State {
         cx: &mut Context<Self>,
     ) -> Self {
         let refresh_llm_token_listener = RefreshLlmTokenListener::global(cx);
-        let llm_api_token = global_llm_api_token(cx);
+        let llm_api_token = global_llm_token(cx);
         Self {
             client: client.clone(),
             llm_api_token,
