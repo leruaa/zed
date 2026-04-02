@@ -19,7 +19,9 @@ pub enum MentionUri {
     File {
         abs_path: PathBuf,
     },
-    PastedImage,
+    PastedImage {
+        name: String,
+    },
     Directory {
         abs_path: PathBuf,
     },
@@ -155,7 +157,10 @@ impl MentionUri {
                         include_warnings,
                     })
                 } else if path.starts_with("/agent/pasted-image") {
-                    Ok(Self::PastedImage)
+                    let fallback = "Image".to_string();
+                    let name = single_query_param(&url, "name")?.unwrap_or_else(|| fallback);
+
+                    Ok(Self::PastedImage { name })
                 } else if path.starts_with("/agent/untitled-buffer") {
                     let fragment = url
                         .fragment()
@@ -227,7 +232,7 @@ impl MentionUri {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .into_owned(),
-            MentionUri::PastedImage => "Image".to_string(),
+            MentionUri::PastedImage { name } => name.clone(),
             MentionUri::Symbol { name, .. } => name.clone(),
             MentionUri::Thread { name, .. } => name.clone(),
             MentionUri::Rule { name, .. } => name.clone(),
@@ -296,7 +301,7 @@ impl MentionUri {
             MentionUri::File { abs_path } => {
                 FileIcons::get_icon(abs_path, cx).unwrap_or_else(|| IconName::File.path().into())
             }
-            MentionUri::PastedImage => IconName::Image.path().into(),
+            MentionUri::PastedImage { .. } => IconName::Image.path().into(),
             MentionUri::Directory { abs_path } => FileIcons::get_folder_icon(false, abs_path, cx)
                 .unwrap_or_else(|| IconName::Folder.path().into()),
             MentionUri::Symbol { .. } => IconName::Code.path().into(),
@@ -322,7 +327,11 @@ impl MentionUri {
                 url.set_path(&abs_path.to_string_lossy());
                 url
             }
-            MentionUri::PastedImage => Url::parse("zed:///agent/pasted-image").unwrap(),
+            MentionUri::PastedImage { name } => {
+                let mut url = Url::parse("zed:///agent/pasted-image").unwrap();
+                url.query_pairs_mut().append_pair("name", name);
+                url
+            }
             MentionUri::Directory { abs_path } => {
                 let mut url = Url::parse("file:///").unwrap();
                 url.set_path(&abs_path.to_string_lossy());
