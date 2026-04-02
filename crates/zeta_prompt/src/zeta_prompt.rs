@@ -932,6 +932,8 @@ pub struct ParsedOutput {
     pub new_editable_region: String,
     /// The byte range within `cursor_excerpt` that this replacement applies to
     pub range_in_excerpt: Range<usize>,
+    /// Byte offset of the cursor marker within `new_editable_region`, if present
+    pub cursor_offset_in_new_editable_region: Option<usize>,
 }
 
 /// Parse model output for the given zeta format
@@ -951,7 +953,7 @@ pub fn parse_zeta2_model_output(
     let old_editable_region = &context[editable_range_in_context.clone()];
     let cursor_offset_in_editable = cursor_offset.saturating_sub(editable_range_in_context.start);
 
-    let (range_in_context, output) = match format {
+    let (range_in_context, mut output) = match format {
         ZetaFormat::v0226Hashline => (
             editable_range_in_context,
             if hashline::output_has_edit_commands(output) {
@@ -999,10 +1001,67 @@ pub fn parse_zeta2_model_output(
     let range_in_excerpt =
         range_in_context.start + context_start..range_in_context.end + context_start;
 
+    let cursor_offset_in_new_editable_region = output.find(CURSOR_MARKER);
+    if let Some(offset) = cursor_offset_in_new_editable_region {
+        output.replace_range(offset..offset + CURSOR_MARKER.len(), "");
+    }
+
     Ok(ParsedOutput {
         new_editable_region: output,
         range_in_excerpt,
+        cursor_offset_in_new_editable_region,
     })
+}
+
+pub fn parse_zeta2_model_output_as_patch(
+    output: &str,
+    format: ZetaFormat,
+    prompt_inputs: &ZetaPromptInput,
+) -> Result<String> {
+    let parsed = parse_zeta2_model_output(output, format, prompt_inputs)?;
+    parsed_output_to_patch(prompt_inputs, parsed)
+}
+
+pub fn parsed_output_to_patch(
+    prompt_inputs: &ZetaPromptInput,
+    parsed: ParsedOutput,
+) -> Result<String> {
+    let range_in_excerpt = parsed.range_in_excerpt;
+    let excerpt = prompt_inputs.cursor_excerpt.as_ref();
+    let old_text = excerpt[range_in_excerpt.clone()].to_string();
+    let mut new_text = parsed.new_editable_region;
+
+    let mut old_text_normalized = old_text;
+    if !new_text.is_empty() && !new_text.ends_with('\n') {
+        new_text.push('\n');
+    }
+    if !old_text_normalized.is_empty() && !old_text_normalized.ends_with('\n') {
+        old_text_normalized.push('\n');
+    }
+
+    let editable_region_offset = range_in_excerpt.start;
+    let editable_region_start_line = excerpt[..editable_region_offset].matches('\n').count() as u32;
+    let editable_region_lines = old_text_normalized.lines().count() as u32;
+
+    let diff = udiff::unified_diff_with_context(
+        &old_text_normalized,
+        &new_text,
+        editable_region_start_line,
+        editable_region_start_line,
+        editable_region_lines,
+    );
+
+    let path = prompt_inputs
+        .cursor_path
+        .to_string_lossy()
+        .trim_start_matches('/')
+        .to_string();
+    let formatted_diff = format!("--- a/{path}\n+++ b/{path}\n{diff}");
+
+    Ok(udiff::encode_cursor_in_patch(
+        &formatted_diff,
+        parsed.cursor_offset_in_new_editable_region,
+    ))
 }
 
 pub fn excerpt_range_for_format(
