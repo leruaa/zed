@@ -3204,12 +3204,9 @@ impl<T: DeserializeOwned> ToolInput<T> {
 
         Ok(match value {
             ToolInputPayload::Partial(payload) => ToolInputPayload::Partial(payload),
-            ToolInputPayload::Full(payload) => match serde_json::from_value(payload) {
-                Ok(value) => ToolInputPayload::Full(value),
-                Err(err) => ToolInputPayload::InvalidJson {
-                    error_message: err.to_string(),
-                },
-            },
+            ToolInputPayload::Full(payload) => {
+                ToolInputPayload::Full(serde_json::from_value(payload)?)
+            }
             ToolInputPayload::InvalidJson { error_message } => {
                 ToolInputPayload::InvalidJson { error_message }
             }
