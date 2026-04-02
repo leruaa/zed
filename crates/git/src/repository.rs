@@ -221,6 +221,27 @@ pub struct Worktree {
     pub sha: SharedString,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub enum CreateWorktreeTarget {
+    ExistingBranch {
+        branch_name: String,
+    },
+    NewBranch {
+        branch_name: String,
+        start_point: Option<String>,
+    },
+}
+
+impl CreateWorktreeTarget {
+    pub fn branch_name(&self) -> &str {
+        match self {
+            Self::ExistingBranch { branch_name } | Self::NewBranch { branch_name, .. } => {
+                branch_name
+            }
+        }
+    }
+}
+
 impl Worktree {
     /// Returns the branch name if the worktree is attached to a branch.
     pub fn branch_name(&self) -> Option<&str> {
@@ -696,9 +717,8 @@ pub trait GitRepository: Send + Sync {
 
     fn create_worktree(
         &self,
-        branch_name: String,
+        target: CreateWorktreeTarget,
         path: PathBuf,
-        from_commit: Option<String>,
     ) -> BoxFuture<'_, Result<()>>;
 
     fn remove_worktree(&self, path: PathBuf, force: bool) -> BoxFuture<'_, Result<()>>;
@@ -1641,23 +1661,28 @@ impl GitRepository for RealGitRepository {
 
     fn create_worktree(
         &self,
-        branch_name: String,
+        target: CreateWorktreeTarget,
         path: PathBuf,
-        from_commit: Option<String>,
     ) -> BoxFuture<'_, Result<()>> {
         let git_binary = self.git_binary();
-        let mut args = vec![
-            OsString::from("worktree"),
-            OsString::from("add"),
-            OsString::from("-b"),
-            OsString::from(branch_name.as_str()),
-            OsString::from("--"),
-            OsString::from(path.as_os_str()),
-        ];
-        if let Some(from_commit) = from_commit {
-            args.push(OsString::from(from_commit));
-        } else {
-            args.push(OsString::from("HEAD"));
+        let mut args = vec![OsString::from("worktree"), OsString::from("add")];
+
+        match &target {
+            CreateWorktreeTarget::ExistingBranch { branch_name } => {
+                args.push(OsString::from("--"));
+                args.push(OsString::from(path.as_os_str()));
+                args.push(OsString::from(branch_name));
+            }
+            CreateWorktreeTarget::NewBranch {
+                branch_name,
+                start_point,
+            } => {
+                args.push(OsString::from("-b"));
+                args.push(OsString::from(branch_name));
+                args.push(OsString::from("--"));
+                args.push(OsString::from(path.as_os_str()));
+                args.push(OsString::from(start_point.as_deref().unwrap_or("HEAD")));
+            }
         }
 
         self.executor
@@ -3978,9 +4003,11 @@ mod tests {
 
         // Create a new worktree
         repo.create_worktree(
-            "test-branch".to_string(),
+            CreateWorktreeTarget::NewBranch {
+                branch_name: "test-branch".to_string(),
+                start_point: Some("HEAD".to_string()),
+            },
             worktree_path.clone(),
-            Some("HEAD".to_string()),
         )
         .await
         .unwrap();
@@ -4037,9 +4064,11 @@ mod tests {
         // Create a worktree
         let worktree_path = worktrees_dir.join("worktree-to-remove");
         repo.create_worktree(
-            "to-remove".to_string(),
+            CreateWorktreeTarget::NewBranch {
+                branch_name: "to-remove".to_string(),
+                start_point: Some("HEAD".to_string()),
+            },
             worktree_path.clone(),
-            Some("HEAD".to_string()),
         )
         .await
         .unwrap();
@@ -4061,9 +4090,11 @@ mod tests {
         // Create a worktree
         let worktree_path = worktrees_dir.join("dirty-wt");
         repo.create_worktree(
-            "dirty-wt".to_string(),
+            CreateWorktreeTarget::NewBranch {
+                branch_name: "dirty-wt".to_string(),
+                start_point: Some("HEAD".to_string()),
+            },
             worktree_path.clone(),
-            Some("HEAD".to_string()),
         )
         .await
         .unwrap();
@@ -4131,9 +4162,11 @@ mod tests {
         // Create a worktree
         let old_path = worktrees_dir.join("old-worktree-name");
         repo.create_worktree(
-            "old-name".to_string(),
+            CreateWorktreeTarget::NewBranch {
+                branch_name: "old-name".to_string(),
+                start_point: Some("HEAD".to_string()),
+            },
             old_path.clone(),
-            Some("HEAD".to_string()),
         )
         .await
         .unwrap();

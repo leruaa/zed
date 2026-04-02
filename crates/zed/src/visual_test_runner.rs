@@ -3413,7 +3413,11 @@ edition = "2021"
     cx.update_window(workspace_window.into(), |_, _window, cx| {
         panel.update(cx, |panel, cx| {
             panel.set_start_thread_in_for_tests(
-                StartThreadIn::NewWorktree { branch_name: None },
+                StartThreadIn::NewWorktree {
+                    worktree_name: None,
+                    branch_name: None,
+                    start_point: None,
+                },
                 cx,
             );
         });
@@ -3489,7 +3493,11 @@ edition = "2021"
 
     cx.update_window(workspace_window.into(), |_, window, cx| {
         window.dispatch_action(
-            Box::new(StartThreadIn::NewWorktree { branch_name: None }),
+            Box::new(StartThreadIn::NewWorktree {
+                worktree_name: None,
+                branch_name: None,
+                start_point: None,
+            }),
             cx,
         );
     })?;

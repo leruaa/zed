@@ -6,9 +6,10 @@ use git::{
     Oid, RunHook,
     blame::Blame,
     repository::{
-        AskPassDelegate, Branch, CommitDataReader, CommitDetails, CommitOptions, FetchOptions,
-        GRAPH_CHUNK_SIZE, GitRepository, GitRepositoryCheckpoint, InitialGraphCommitData, LogOrder,
-        LogSource, PushOptions, Remote, RepoPath, ResetMode, SearchCommitArgs, Worktree,
+        AskPassDelegate, Branch, CommitDataReader, CommitDetails, CommitOptions,
+        CreateWorktreeTarget, FetchOptions, GRAPH_CHUNK_SIZE, GitRepository,
+        GitRepositoryCheckpoint, InitialGraphCommitData, LogOrder, LogSource, PushOptions, Remote,
+        RepoPath, ResetMode, SearchCommitArgs, Worktree,
     },
     status::{
         DiffTreeType, FileStatus, GitStatus, StatusCode, TrackedStatus, TreeDiff, TreeDiffStatus,
@@ -438,9 +439,8 @@ impl GitRepository for FakeGitRepository {
 
     fn create_worktree(
         &self,
-        branch_name: String,
+        target: CreateWorktreeTarget,
         path: PathBuf,
-        from_commit: Option<String>,
     ) -> BoxFuture<'_, Result<()>> {
         let fs = self.fs.clone();
         let executor = self.executor.clone();
@@ -460,18 +460,39 @@ impl GitRepository for FakeGitRepository {
             fs.with_git_state(&dot_git_path, true, {
                 let path = path.clone();
                 move |state| {
-                    if state.branches.contains(&branch_name) {
-                        bail!("a branch named '{}' already exists", branch_name);
-                    }
+                    let (branch_name, sha) = match target {
+                        CreateWorktreeTarget::ExistingBranch { branch_name } => {
+                            if !state.branches.contains(&branch_name) {
+                                bail!("no branch named '{}' exists", branch_name);
+                            }
+                            let ref_name = format!("refs/heads/{branch_name}");
+                            let sha = state
+                                .refs
+                                .get(&ref_name)
+                                .cloned()
+                                .unwrap_or_else(|| "fake-sha".to_string());
+                            (branch_name, sha)
+                        }
+                        CreateWorktreeTarget::NewBranch {
+                            branch_name,
+                            start_point,
+                        } => {
+                            if state.branches.contains(&branch_name) {
+                                bail!("a branch named '{}' already exists", branch_name);
+                            }
+                            let ref_name = format!("refs/heads/{branch_name}");
+                            let sha = start_point.unwrap_or_else(|| "fake-sha".to_string());
+                            state.refs.insert(ref_name, sha.clone());
+                            state.branches.insert(branch_name.clone());
+                            (branch_name, sha)
+                        }
+                    };
                     let ref_name = format!("refs/heads/{branch_name}");
-                    let sha = from_commit.unwrap_or_else(|| "fake-sha".to_string());
-                    state.refs.insert(ref_name.clone(), sha.clone());
                     state.worktrees.push(Worktree {
                         path,
                         ref_name: Some(ref_name.into()),
                         sha: sha.into(),
                     });
-                    state.branches.insert(branch_name);
                     Ok::<(), anyhow::Error>(())
                 }
             })??;

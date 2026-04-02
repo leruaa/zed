@@ -42,6 +42,15 @@ impl ThreadWorktreePicker {
 
         let worktrees_request = repository.map(|repo| repo.update(cx, |repo, _| repo.worktrees()));
 
+        let (preserved_branch_name, preserved_start_point) = match current_target {
+            StartThreadIn::NewWorktree {
+                branch_name,
+                start_point,
+                ..
+            } => (branch_name.clone(), start_point.clone()),
+            _ => (None, None),
+        };
+
         let delegate = ThreadWorktreePickerDelegate {
             matches: vec![
                 ThreadWorktreeEntry::CurrentWorktree,
@@ -54,6 +63,8 @@ impl ThreadWorktreePicker {
                 StartThreadIn::NewWorktree { .. } => 1,
                 _ => 0,
             },
+            preserved_branch_name,
+            preserved_start_point,
             has_git_repo,
             is_via_collab,
         };
@@ -137,6 +148,8 @@ pub(crate) struct ThreadWorktreePickerDelegate {
     all_worktrees: Option<Vec<GitWorktree>>,
     project_worktree_paths: Vec<PathBuf>,
     selected_index: usize,
+    preserved_branch_name: Option<String>,
+    preserved_start_point: Option<String>,
     has_git_repo: bool,
     is_via_collab: bool,
 }
@@ -145,7 +158,7 @@ impl PickerDelegate for ThreadWorktreePickerDelegate {
     type ListItem = ListItem;
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
-        "Search worktrees…".into()
+        "Search or create worktrees…".into()
     }
 
     fn editor_position(&self) -> PickerEditorPosition {
@@ -170,7 +183,11 @@ impl PickerDelegate for ThreadWorktreePickerDelegate {
     }
 
     fn separators_after_indices(&self) -> Vec<usize> {
-        vec![1]
+        if self.matches.len() > 2 {
+            vec![1]
+        } else {
+            Vec::new()
+        }
     }
 
     fn update_matches(
@@ -300,7 +317,11 @@ impl PickerDelegate for ThreadWorktreePickerDelegate {
             }
             ThreadWorktreeEntry::NewWorktree => {
                 window.dispatch_action(
-                    Box::new(StartThreadIn::NewWorktree { branch_name: None }),
+                    Box::new(StartThreadIn::NewWorktree {
+                        worktree_name: None,
+                        branch_name: self.preserved_branch_name.clone(),
+                        start_point: self.preserved_start_point.clone(),
+                    }),
                     cx,
                 );
             }
@@ -316,7 +337,9 @@ impl PickerDelegate for ThreadWorktreePickerDelegate {
             ThreadWorktreeEntry::CreateNamed { name } => {
                 window.dispatch_action(
                     Box::new(StartThreadIn::NewWorktree {
-                        branch_name: Some(name.clone()),
+                        worktree_name: Some(name.clone()),
+                        branch_name: self.preserved_branch_name.clone(),
+                        start_point: self.preserved_start_point.clone(),
                     }),
                     cx,
                 );

@@ -1267,9 +1267,11 @@ mod git_worktrees {
         cx.update(|cx| {
             repository.update(cx, |repository, _| {
                 repository.create_worktree(
-                    "feature-branch".to_string(),
+                    git::repository::CreateWorktreeTarget::NewBranch {
+                        branch_name: "feature-branch".to_string(),
+                        start_point: Some("abc123".to_string()),
+                    },
                     worktree_1_directory.clone(),
-                    Some("abc123".to_string()),
                 )
             })
         })
@@ -1297,9 +1299,11 @@ mod git_worktrees {
         cx.update(|cx| {
             repository.update(cx, |repository, _| {
                 repository.create_worktree(
-                    "bugfix-branch".to_string(),
+                    git::repository::CreateWorktreeTarget::NewBranch {
+                        branch_name: "bugfix-branch".to_string(),
+                        start_point: None,
+                    },
                     worktree_2_directory.clone(),
-                    None,
                 )
             })
         })

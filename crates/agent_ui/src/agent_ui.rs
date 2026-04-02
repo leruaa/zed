@@ -31,6 +31,7 @@ mod terminal_inline_assistant;
 pub mod test_support;
 mod text_thread_editor;
 mod text_thread_history;
+mod thread_branch_picker;
 mod thread_history;
 mod thread_history_view;
 mod thread_import;
@@ -296,7 +297,11 @@ pub enum StartThreadIn {
     LocalProject,
     NewWorktree {
         #[serde(default)]
+        worktree_name: Option<String>,
+        #[serde(default)]
         branch_name: Option<String>,
+        #[serde(default)]
+        start_point: Option<String>,
     },
     LinkedWorktree {
         path: PathBuf,

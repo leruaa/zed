@@ -14,11 +14,6 @@ impl HoldForDefault {
             more_content: true,
         }
     }
-
-    pub fn more_content(mut self, more_content: bool) -> Self {
-        self.more_content = more_content;
-        self
-    }
 }
 
 impl RenderOnce for HoldForDefault {
