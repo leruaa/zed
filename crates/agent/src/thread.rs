@@ -2414,8 +2414,8 @@ impl Thread {
         cx: &mut Context<Self>,
     ) -> Option<Task<LanguageModelToolResult>> {
         let tool_use = LanguageModelToolUse {
-            id: tool_use_id.clone(),
-            name: tool_name.clone(),
+            id: tool_use_id,
+            name: tool_name,
             raw_input: raw_input.to_string(),
             input: serde_json::json!({}),
             is_input_complete: true,
@@ -3208,7 +3208,7 @@ impl<T: DeserializeOwned> ToolInput<T> {
             ToolInputPayload::Full(payload) => match serde_json::from_value(payload) {
                 Ok(value) => ToolInputPayload::Full(value),
                 Err(err) => ToolInputPayload::InvalidJson {
-                    error_message: err.to_string().into(),
+                    error_message: err.to_string(),
                 },
             },
             ToolInputPayload::InvalidJson { error_message } => {

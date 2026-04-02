@@ -2212,13 +2212,13 @@ mod tests {
 
         let result = test_resolve_path(&mode, "root/dir/subdir", cx);
         assert_eq!(
-            result.await.unwrap_err().to_string(),
+            result.await.unwrap_err(),
             "Can't write to file: path is a directory"
         );
 
         let result = test_resolve_path(&mode, "root/dir/nonexistent_dir/new.txt", cx);
         assert_eq!(
-            result.await.unwrap_err().to_string(),
+            result.await.unwrap_err(),
             "Can't create file: parent directory doesn't exist"
         );
     }
@@ -2236,14 +2236,11 @@ mod tests {
         assert_resolved_path_eq(result.await, rel_path(path_without_root));
 
         let result = test_resolve_path(&mode, "root/nonexistent.txt", cx);
-        assert_eq!(
-            result.await.unwrap_err().to_string(),
-            "Can't edit file: path not found"
-        );
+        assert_eq!(result.await.unwrap_err(), "Can't edit file: path not found");
 
         let result = test_resolve_path(&mode, "root/dir", cx);
         assert_eq!(
-            result.await.unwrap_err().to_string(),
+            result.await.unwrap_err(),
             "Can't edit file: path is a directory"
         );
     }

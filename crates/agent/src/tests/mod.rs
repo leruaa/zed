@@ -3932,8 +3932,7 @@ async fn test_streaming_tool_json_parse_error_finalizes_sender(cx: &mut TestAppC
         is_input_complete: false,
         thought_signature: None,
     };
-    fake_model
-        .send_last_completion_stream_event(LanguageModelCompletionEvent::ToolUse(tool_use.clone()));
+    fake_model.send_last_completion_stream_event(LanguageModelCompletionEvent::ToolUse(tool_use));
     cx.run_until_parked();
 
     // Now emit a ToolUseJsonParseError for the SAME tool_use id. This
