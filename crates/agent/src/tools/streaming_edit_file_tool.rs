@@ -257,6 +257,14 @@ pub struct StreamingEditFileTool {
     language_registry: Arc<LanguageRegistry>,
 }
 
+enum EditLoopOutcome {
+    Completed(EditSession),
+    Failed {
+        error: String,
+        session: Option<EditSession>,
+    },
+}
+
 impl StreamingEditFileTool {
     pub fn new(
         project: Entity<Project>,
@@ -332,36 +340,124 @@ impl StreamingEditFileTool {
         });
     }
 
-    async fn handle_output(
+    async fn run_edit_loop(
         &self,
-        result: Result<EditSession, (String, Option<EditSession>)>,
+        input: &mut ToolInput<StreamingEditFileToolInput>,
+        event_stream: &ToolCallEventStream,
         cx: &mut AsyncApp,
-    ) -> Result<StreamingEditFileToolOutput, StreamingEditFileToolOutput> {
-        match result {
-            Ok(session) => {
-                self.ensure_buffer_saved(&session.buffer, cx).await;
-                let (new_text, diff) = session.compute_new_text_and_diff(cx).await;
-                Ok(StreamingEditFileToolOutput::Success {
-                    old_text: session.old_text.clone(),
-                    new_text,
-                    input_path: session.input_path,
-                    diff,
-                })
+    ) -> EditLoopOutcome {
+        let mut session: Option<EditSession> = None;
+        let mut last_partial: Option<StreamingEditFileToolPartialInput> = None;
+
+        loop {
+            futures::select! {
+                payload = input.next().fuse() => {
+                    match payload {
+                        Ok(payload) => match payload {
+                            ToolInputPayload::Partial(partial) => {
+                                if let Ok(parsed) = serde_json::from_value::<StreamingEditFileToolPartialInput>(partial) {
+                                    let path_complete = parsed.path.is_some()
+                                        && parsed.path.as_ref() == last_partial.as_ref().and_then(|partial| partial.path.as_ref());
+
+                                    last_partial = Some(parsed.clone());
+
+                                    if session.is_none()
+                                        && path_complete
+                                        && let StreamingEditFileToolPartialInput {
+                                            path: Some(path),
+                                            display_description: Some(display_description),
+                                            mode: Some(mode),
+                                            ..
+                                        } = &parsed
+                                    {
+                                        match EditSession::new(
+                                            PathBuf::from(path),
+                                            display_description,
+                                            *mode,
+                                            self,
+                                            event_stream,
+                                            cx,
+                                        )
+                                        .await
+                                        {
+                                            Ok(created_session) => session = Some(created_session),
+                                            Err(error) => {
+                                                log::error!("Failed to create edit session: {}", error);
+                                                return EditLoopOutcome::Failed {
+                                                    error,
+                                                    session: None,
+                                                };
+                                            }
+                                        }
+                                    }
+
+                                    if let Some(current_session) = &mut session
+                                        && let Err(error) = current_session.process(parsed, self, event_stream, cx)
+                                    {
+                                        log::error!("Failed to process edit: {}", error);
+                                        return EditLoopOutcome::Failed { error, session };
+                                    }
+                                }
+                            }
+                            ToolInputPayload::Full(full_input) => {
+                                let mut session = if let Some(session) = session {
+                                    session
+                                } else {
+                                    match EditSession::new(
+                                        full_input.path.clone(),
+                                        &full_input.display_description,
+                                        full_input.mode,
+                                        self,
+                                        event_stream,
+                                        cx,
+                                    )
+                                    .await
+                                    {
+                                        Ok(created_session) => created_session,
+                                        Err(error) => {
+                                            log::error!("Failed to create edit session: {}", error);
+                                            return EditLoopOutcome::Failed {
+                                                error,
+                                                session: None,
+                                            };
+                                        }
+                                    }
+                                };
+
+                                return match session.finalize(full_input, self, event_stream, cx).await {
+                                    Ok(()) => EditLoopOutcome::Completed(session),
+                                    Err(error) => {
+                                        log::error!("Failed to finalize edit: {}", error);
+                                        EditLoopOutcome::Failed {
+                                            error,
+                                            session: Some(session),
+                                        }
+                                    }
+                                };
+                            }
+                            ToolInputPayload::InvalidJson { error_message } => {
+                                log::error!("Received invalid JSON: {error_message}");
+                                return EditLoopOutcome::Failed {
+                                    error: error_message,
+                                    session,
+                                };
+                            }
+                        },
+                        Err(error) => {
+                            return EditLoopOutcome::Failed {
+                                error: format!("Failed to receive tool input: {error}"),
+                                session,
+                            };
+                        }
+                    }
+                }
+                _ = event_stream.cancelled_by_user().fuse() => {
+                    return EditLoopOutcome::Failed {
+                        error: "Edit cancelled by user".to_string(),
+                        session,
+                    };
+                }
             }
-            Err((error, Some(session))) => {
-                self.ensure_buffer_saved(&session.buffer, cx).await;
-                let (_new_text, diff) = session.compute_new_text_and_diff(cx).await;
-                Err(StreamingEditFileToolOutput::Error {
-                    error,
-                    input_path: Some(session.input_path),
-                    diff,
-                })
-            }
-            Err((error, None)) => Err(StreamingEditFileToolOutput::Error {
-                error,
-                input_path: None,
-                diff: String::new(),
-            }),
         }
     }
 }
@@ -436,97 +532,40 @@ impl AgentTool for StreamingEditFileTool {
         cx: &mut App,
     ) -> Task<Result<Self::Output, Self::Output>> {
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let mut state: Option<EditSession> = None;
-            let mut last_partial: Option<StreamingEditFileToolPartialInput> = None;
-            loop {
-                futures::select! {
-                    payload = input.next().fuse() => {
-                        match payload {
-                            Ok(payload) => match payload {
-                                ToolInputPayload::Partial(partial) => {
-                                    if let Ok(parsed) = serde_json::from_value::<StreamingEditFileToolPartialInput>(partial) {
-                                        let path_complete = parsed.path.is_some()
-                                            && parsed.path.as_ref() == last_partial.as_ref().and_then(|p| p.path.as_ref());
-
-                                        last_partial = Some(parsed.clone());
-
-                                        if state.is_none()
-                                            && path_complete
-                                            && let StreamingEditFileToolPartialInput {
-                                                path: Some(path),
-                                                display_description: Some(display_description),
-                                                mode: Some(mode),
-                                                ..
-                                            } = &parsed
-                                        {
-                                            match EditSession::new(
-                                                PathBuf::from(path),
-                                                display_description,
-                                                *mode,
-                                                &self,
-                                                &event_stream,
-                                                cx,
-                                            )
-                                            .await
-                                            {
-                                                Ok(session) => state = Some(session),
-                                                Err(e) => {
-                                                    log::error!("Failed to create edit session: {}", e);
-                                                    return self.handle_output(Err((e, None)), cx).await;
-                                                }
-                                            }
-                                        }
-
-                                        if let Some(state_ref) = &mut state {
-                                            if let Err(e) = state_ref.process(parsed, &self, &event_stream, cx) {
-                                                log::error!("Failed to process edit: {}", e);
-                                                return self.handle_output(Err((e, state)), cx).await;
-                                            }
-                                        }
-                                    }
-                                },
-                                ToolInputPayload::Full(full_input) => {
-                                    let mut state = if let Some(state) = state {
-                                        state
-                                    } else {
-                                        match EditSession::new(
-                                            full_input.path.clone(),
-                                            &full_input.display_description,
-                                            full_input.mode,
-                                            &self,
-                                            &event_stream,
-                                            cx,
-                                        )
-                                        .await
-                                        {
-                                            Ok(session) => session,
-                                            Err(e) => {
-                                                log::error!("Failed to create edit session: {}", e);
-                                                return self.handle_output(Err((e, None)), cx).await;
-                                            }
-                                        }
-                                    };
-                                    return match state.finalize(full_input, &self, &event_stream, cx).await {
-                                        Ok(_) => self.handle_output(Ok(state), cx).await,
-                                        Err(e) => {
-                                            log::error!("Failed to finalize edit: {}", e);
-                                            self.handle_output(Err((e, Some(state))), cx).await
-                                        }
-                                    }
-                                },
-                                ToolInputPayload::InvalidJson { error_message } => {
-                                    log::error!("Received invalid JSON: {error_message}");
-                                    return self.handle_output(Err((error_message, state)), cx).await
-                                },
-                            }
-                            Err(e) => {
-                                return self.handle_output(Err((format!("Failed to receive tool input: {e}"), state)), cx).await
-                            }
-                        }
-                    }
-                    _ = event_stream.cancelled_by_user().fuse() => {
-                        return self.handle_output(Err((format!("Edit cancelled by user"), state)), cx).await
-                    }
+            match self.run_edit_loop(&mut input, &event_stream, cx).await {
+                EditLoopOutcome::Completed(session) => {
+                    self.ensure_buffer_saved(&session.buffer, cx).await;
+                    let (new_text, diff) = session.compute_new_text_and_diff(cx).await;
+                    Ok(StreamingEditFileToolOutput::Success {
+                        old_text: session.old_text.clone(),
+                        new_text,
+                        input_path: session.input_path,
+                        diff,
+                    })
+                }
+                EditLoopOutcome::Failed {
+                    mut error,
+                    session: Some(session),
+                } => {
+                    self.ensure_buffer_saved(&session.buffer, cx).await;
+                    let (_new_text, diff) = session.compute_new_text_and_diff(cx).await;
+                    error.push_str("\nSome edits were applied");
+                    Err(StreamingEditFileToolOutput::Error {
+                        error,
+                        input_path: Some(session.input_path),
+                        diff,
+                    })
+                }
+                EditLoopOutcome::Failed {
+                    mut error,
+                    session: None,
+                } => {
+                    error.push_str("\nNo edits were made");
+                    Err(StreamingEditFileToolOutput::Error {
+                        error,
+                        input_path: None,
+                        diff: String::new(),
+                    })
                 }
             }
         })
