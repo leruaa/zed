@@ -61,6 +61,10 @@ impl ComplianceArgs {
 
 async fn check_compliance_impl(args: ComplianceArgs) -> Result<()> {
     let in_workflow_context = std::env::var("GITHUB_ACTIONS").is_ok_and(|v| v == "true");
+
+    let app_id = std::env::var("GITHUB_APP_ID").context("Missing GITHUB_APP_ID")?;
+    let key = std::env::var("GITHUB_APP_KEY").context("Missing GITHUB_APP_KEY")?;
+
     let tag = args.version_tag();
 
     let previous_version = GitCommand::run(GetVersionTags)?
@@ -83,9 +87,6 @@ async fn check_compliance_impl(args: ComplianceArgs) -> Result<()> {
     let commits = GitCommand::run(CommitsFromVersionToHead(previous_version))?;
 
     println!("Found {} commits to check", commits.len());
-
-    let app_id = std::env::var("GITHUB_APP_ID").context("Missing GITHUB_APP_ID")?;
-    let key = std::env::var("GITHUB_APP_KEY").context("Missing GITHUB_APP_KEY")?;
 
     let client = GitHubClient::for_app(
         app_id.parse().context("Failed to parse app ID as int")?,
