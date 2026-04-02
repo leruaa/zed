@@ -89,7 +89,6 @@ struct ChannelMoveClipboard {
 
 const COLLABORATION_PANEL_KEY: &str = "CollaborationPanel";
 const TOAST_DURATION: Duration = Duration::from_secs(5);
-const MARK_AS_READ_DELAY: Duration = Duration::from_secs(1);
 
 pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _, _| {
@@ -2618,26 +2617,28 @@ impl CollabPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let entry = &self.entries[ix];
+        let entry = self.entries[ix].clone();
 
         let is_selected = self.selection == Some(ix);
         match entry {
             ListEntry::Header(section) => {
-                let is_collapsed = self.collapsed_sections.contains(section);
-                self.render_header(*section, is_selected, is_collapsed, cx)
+                let is_collapsed = self.collapsed_sections.contains(&section);
+                self.render_header(section, is_selected, is_collapsed, cx)
                     .into_any_element()
             }
-            ListEntry::Contact { contact, calling } => self
-                .render_contact(contact, *calling, is_selected, cx)
-                .into_any_element(),
+            ListEntry::Contact { contact, calling } => {
+                self.mark_contact_request_accepted_notifications_read(contact.user.id, cx);
+                self.render_contact(&contact, calling, is_selected, cx)
+                    .into_any_element()
+            }
             ListEntry::ContactPlaceholder => self
                 .render_contact_placeholder(is_selected, cx)
                 .into_any_element(),
             ListEntry::IncomingRequest(user) => self
-                .render_contact_request(user, true, is_selected, cx)
+                .render_contact_request(&user, true, is_selected, cx)
                 .into_any_element(),
             ListEntry::OutgoingRequest(user) => self
-                .render_contact_request(user, false, is_selected, cx)
+                .render_contact_request(&user, false, is_selected, cx)
                 .into_any_element(),
             ListEntry::Channel {
                 channel,
@@ -2647,9 +2648,9 @@ impl CollabPanel {
                 ..
             } => self
                 .render_channel(
-                    channel,
-                    *depth,
-                    *has_children,
+                    &channel,
+                    depth,
+                    has_children,
                     is_selected,
                     ix,
                     string_match.as_ref(),
@@ -2657,10 +2658,10 @@ impl CollabPanel {
                 )
                 .into_any_element(),
             ListEntry::ChannelEditor { depth } => self
-                .render_channel_editor(*depth, window, cx)
+                .render_channel_editor(depth, window, cx)
                 .into_any_element(),
             ListEntry::ChannelInvite(channel) => self
-                .render_channel_invite(channel, is_selected, cx)
+                .render_channel_invite(&channel, is_selected, cx)
                 .into_any_element(),
             ListEntry::CallParticipant {
                 user,
@@ -2668,7 +2669,7 @@ impl CollabPanel {
                 is_pending,
                 role,
             } => self
-                .render_call_participant(user, *peer_id, *is_pending, *role, is_selected, cx)
+                .render_call_participant(&user, peer_id, is_pending, role, is_selected, cx)
                 .into_any_element(),
             ListEntry::ParticipantProject {
                 project_id,
@@ -2677,20 +2678,20 @@ impl CollabPanel {
                 is_last,
             } => self
                 .render_participant_project(
-                    *project_id,
-                    worktree_root_names,
-                    *host_user_id,
-                    *is_last,
+                    project_id,
+                    &worktree_root_names,
+                    host_user_id,
+                    is_last,
                     is_selected,
                     window,
                     cx,
                 )
                 .into_any_element(),
             ListEntry::ParticipantScreen { peer_id, is_last } => self
-                .render_participant_screen(*peer_id, *is_last, is_selected, window, cx)
+                .render_participant_screen(peer_id, is_last, is_selected, window, cx)
                 .into_any_element(),
             ListEntry::ChannelNotes { channel_id } => self
-                .render_channel_notes(*channel_id, is_selected, window, cx)
+                .render_channel_notes(channel_id, is_selected, window, cx)
                 .into_any_element(),
         }
     }
@@ -3373,13 +3374,9 @@ impl CollabPanel {
         cx: &App,
     ) -> Option<(Option<Arc<User>>, String)> {
         let user_store = self.user_store.read(cx);
-        let channel_store = self.channel_store.read(cx);
         match &entry.notification {
             Notification::ContactRequest { sender_id } => {
                 let requester = user_store.get_cached_user(*sender_id)?;
-                if !user_store.has_incoming_contact_request(requester.id) {
-                    return None;
-                }
                 Some((
                     Some(requester.clone()),
                     format!("{} wants to add you as a contact", requester.github_login),
@@ -3394,13 +3391,10 @@ impl CollabPanel {
             }
             Notification::ChannelInvitation {
                 channel_name,
-                channel_id,
                 inviter_id,
+                ..
             } => {
                 let inviter = user_store.get_cached_user(*inviter_id)?;
-                if !channel_store.has_channel_invitation(ChannelId(*channel_id)) {
-                    return None;
-                }
                 Some((
                     Some(inviter.clone()),
                     format!(
@@ -3424,13 +3418,6 @@ impl CollabPanel {
         );
 
         let notification_id = entry.id;
-        let accepted_notification_id =
-            matches!(notification, Notification::ContactRequestAccepted { .. })
-                .then_some(notification_id);
-
-        if let Some(notification_id) = accepted_notification_id {
-            self.mark_notification_read(notification_id, cx);
-        }
 
         self.current_notification_toast = Some((
             notification_id,
@@ -3453,7 +3440,6 @@ impl CollabPanel {
                         actor,
                         text,
                         notification: needs_response.then(|| notification),
-                        accepted_notification_id,
                         workspace,
                         collab_panel: collab_panel.clone(),
                         focus_handle: cx.focus_handle(),
@@ -3469,18 +3455,48 @@ impl CollabPanel {
             .entry(notification_id)
             .or_insert_with(|| {
                 cx.spawn(async move |this, cx| {
-                    cx.background_executor().timer(MARK_AS_READ_DELAY).await;
-                    client
+                    let request_result = client
                         .request(proto::MarkNotificationRead { notification_id })
-                        .await?;
+                        .await;
 
                     this.update(cx, |this, _| {
                         this.mark_as_read_tasks.remove(&notification_id);
                     })?;
 
+                    request_result?;
                     Ok(())
                 })
             });
+    }
+
+    fn mark_contact_request_accepted_notifications_read(
+        &mut self,
+        contact_user_id: u64,
+        cx: &mut Context<Self>,
+    ) {
+        let notification_ids = self.notification_store.read_with(cx, |store, _| {
+            (0..store.notification_count())
+                .filter_map(|index| {
+                    let entry = store.notification_at(index)?;
+                    if entry.is_read {
+                        return None;
+                    }
+
+                    match &entry.notification {
+                        Notification::ContactRequestAccepted { responder_id }
+                            if *responder_id == contact_user_id =>
+                        {
+                            Some(entry.id)
+                        }
+                        _ => None,
+                    }
+                })
+                .collect::<Vec<_>>()
+        });
+
+        for notification_id in notification_ids {
+            self.mark_notification_read(notification_id, cx);
+        }
     }
 
     fn remove_toast(&mut self, notification_id: u64, cx: &mut Context<Self>) {
@@ -3836,7 +3852,6 @@ pub struct CollabNotificationToast {
     actor: Option<Arc<User>>,
     text: String,
     notification: Option<Notification>,
-    accepted_notification_id: Option<u64>,
     workspace: WeakEntity<Workspace>,
     collab_panel: WeakEntity<CollabPanel>,
     focus_handle: FocusHandle,
@@ -3878,16 +3893,6 @@ impl CollabNotificationToast {
         }
         cx.emit(DismissEvent);
     }
-
-    fn mark_accepted_notification_read(&self, cx: &mut Context<Self>) {
-        if let Some(notification_id) = self.accepted_notification_id {
-            self.collab_panel
-                .update(cx, |collab_panel, cx| {
-                    collab_panel.mark_notification_read(notification_id, cx);
-                })
-                .ok();
-        }
-    }
 }
 
 impl Render for CollabNotificationToast {
@@ -3911,8 +3916,7 @@ impl Render for CollabNotificationToast {
                 cx.stop_propagation();
             }))
         } else {
-            Button::new("close", "Close").on_click(cx.listener(|this, _, _, cx| {
-                this.mark_accepted_notification_read(cx);
+            Button::new("close", "Close").on_click(cx.listener(|_, _, _, cx| {
                 cx.emit(DismissEvent);
             }))
         };
@@ -3926,7 +3930,6 @@ impl Render for CollabNotificationToast {
         div()
             .id("collab_notification_toast")
             .on_click(cx.listener(|this, _, window, cx| {
-                this.mark_accepted_notification_read(cx);
                 this.focus_collab_panel(window, cx);
                 cx.emit(DismissEvent);
             }))
