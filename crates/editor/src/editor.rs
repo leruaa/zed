@@ -8606,6 +8606,14 @@ impl Editor {
         )
     }
 
+    pub fn point_for_position(&self, position: gpui::Point<Pixels>) -> Option<PointForPosition> {
+        Some(
+            self.last_position_map
+                .as_ref()?
+                .point_for_position(position),
+        )
+    }
+
     fn is_cmd_or_ctrl_pressed(modifiers: &Modifiers, cx: &mut Context<Self>) -> bool {
         match EditorSettings::get_global(cx).multi_cursor_modifier {
             MultiCursorModifier::Alt => modifiers.secondary(),

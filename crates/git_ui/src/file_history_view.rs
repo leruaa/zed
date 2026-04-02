@@ -264,6 +264,7 @@ impl FileHistoryView {
                 self.workspace.clone(),
                 None,
                 Some(self.history.path.clone()),
+                None,
                 window,
                 cx,
             );

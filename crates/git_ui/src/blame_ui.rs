@@ -107,13 +107,14 @@ impl BlameRenderer for GitBlameRenderer {
                             let blame_entry = blame_entry.clone();
                             let repository = repository.clone();
                             let workspace = workspace.clone();
-                            move |_, window, cx| {
+                            move |e, window, cx| {
                                 CommitView::open(
                                     blame_entry.sha.to_string(),
                                     repository.downgrade(),
                                     workspace.clone(),
                                     None,
                                     None,
+                                    e.mouse_position(),
                                     window,
                                     cx,
                                 )
@@ -352,6 +353,7 @@ impl BlameRenderer for GitBlameRenderer {
                                                         workspace.clone(),
                                                         None,
                                                         None,
+                                                        None,
                                                         window,
                                                         cx,
                                                     );
@@ -383,6 +385,7 @@ impl BlameRenderer for GitBlameRenderer {
             blame_entry.sha.to_string(),
             repository.downgrade(),
             workspace,
+            None,
             None,
             None,
             window,

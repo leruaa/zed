@@ -5526,6 +5526,7 @@ impl MultiBufferSnapshot {
             return None;
         }
         let excerpt = cursor.excerpt()?;
+        dbg!(&excerpt.path_key);
         let excerpt_start = *cursor.excerpts.start();
         let input_buffer_start = cursor.buffer_position_at(&position.start)?;
 

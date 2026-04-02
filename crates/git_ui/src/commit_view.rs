@@ -2,7 +2,11 @@ use anyhow::{Context as _, Result};
 use buffer_diff::BufferDiff;
 use collections::HashMap;
 use editor::display_map::{BlockPlacement, BlockProperties, BlockStyle};
-use editor::{Addon, Editor, EditorEvent, ExcerptRange, MultiBuffer, multibuffer_context_lines};
+use editor::scroll::Autoscroll;
+use editor::{
+    Addon, BufferOffset, Editor, EditorEvent, ExcerptRange, MultiBuffer, MultiBufferOffset,
+    SelectionEffects, ToOffset, multibuffer_context_lines,
+};
 use git::repository::{CommitDetails, CommitDiff, RepoPath, is_binary_content};
 use git::status::{FileStatus, StatusCode, TrackedStatus};
 use git::{
@@ -18,7 +22,7 @@ use language::{
     Anchor, Buffer, Capability, DiskState, File, LanguageRegistry, LineEnding, OffsetRangeExt as _,
     Point, ReplicaId, Rope, TextBuffer,
 };
-use multi_buffer::PathKey;
+use multi_buffer::{MultiBufferRow, PathKey};
 use project::{Project, WorktreeId, git_store::Repository};
 use std::{
     any::{Any, TypeId},
@@ -104,6 +108,7 @@ impl CommitView {
         workspace: WeakEntity<Workspace>,
         stash: Option<usize>,
         file_filter: Option<RepoPath>,
+        clicked_point: Option<gpui::Point<Pixels>>,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -129,29 +134,132 @@ impl CommitView {
 
                 workspace
                     .update_in(cx, |workspace, window, cx| {
-                        let project = workspace.project();
-                        let commit_view = cx.new(|cx| {
-                            CommitView::new(
-                                commit_details,
-                                commit_diff,
-                                repo,
-                                project.clone(),
-                                stash,
-                                window,
-                                cx,
-                            )
-                        });
-
                         let pane = workspace.active_pane();
                         pane.update(cx, |pane, cx| {
+                            let target_buffer = pane
+                                .active_item()
+                                .and_then(|item| item.act_as::<Editor>(cx))
+                                .zip(clicked_point)
+                                .and_then(|(e, clicked_point)| {
+                                    e.update(cx, |e, cx| {
+                                        let snapshot = e.snapshot(window, cx);
+                                        e.point_for_position(clicked_point)
+                                            .and_then(|p| p.as_valid())
+                                            .map(|a| a.to_point(&snapshot))
+                                            .and_then(|multi_buffer_point| {
+                                                snapshot.buffer().buffer_line_for_row(
+                                                    MultiBufferRow(multi_buffer_point.row),
+                                                )
+                                            })
+                                            .and_then(|(buffer_snasphot, buffer_range)| {
+                                                // TODO kb consider remotes either!
+                                                Some((
+                                                    buffer_range.start.row,
+                                                    buffer_snasphot
+                                                        .file()?
+                                                        .as_local()?
+                                                        .abs_path(cx),
+                                                ))
+                                            })
+                                    })
+                                });
+
                             let ix = pane.items().position(|item| {
                                 let commit_view = item.downcast::<CommitView>();
+                                // TODO kb later, generic code
                                 commit_view
                                     .is_some_and(|view| view.read(cx).commit.sha == commit_sha)
                             });
                             if let Some(ix) = ix {
                                 pane.activate_item(ix, true, true, window, cx);
                             } else {
+                                let project = workspace.project();
+                                let commit_view = cx.new(|cx| {
+                                    CommitView::new(
+                                        commit_details,
+                                        commit_diff,
+                                        repo,
+                                        project.clone(),
+                                        stash,
+                                        window,
+                                        cx,
+                                    )
+                                });
+
+                                if let Some((target_buffer_row, target_buffer_path)) =
+                                    dbg!(target_buffer)
+                                {
+                                    let commit_view_editor = commit_view.read(cx).editor.clone();
+                                    cx.defer_in(window, move |_, window, cx| {
+                                        commit_view_editor.update(cx, |editor, cx| {
+                                            let multi_buffer_snapshot =
+                                                editor.buffer().read(cx).snapshot(cx);
+                                            let target_anchors = multi_buffer_snapshot
+                                                .map_excerpt_ranges(
+                                                    MultiBufferOffset(0)
+                                                        ..multi_buffer_snapshot.len(),
+                                                    |buffer, _, buffer_range| {
+                                                        dbg!(
+                                                            // TODO kb what to do next??? this is None for the git-history ones!!
+                                                            buffer.file().is_some(),
+                                                            &buffer_range
+                                                        );
+                                                        if buffer.file().and_then(|f| {
+                                                            Some(dbg!(f.as_local()?.abs_path(cx)))
+                                                        }) == Some(target_buffer_path)
+                                                        {
+                                                            let excerpt_point_range =
+                                                                buffer_range.to_point(buffer);
+                                                            dbg!(&excerpt_point_range);
+                                                            if excerpt_point_range.start.row
+                                                                >= target_buffer_row
+                                                                && excerpt_point_range.end.row
+                                                                    < target_buffer_row
+                                                            {
+                                                                let buffer_offset = BufferOffset(
+                                                                    buffer.point_to_offset(
+                                                                        Point::new(
+                                                                            target_buffer_row,
+                                                                            0,
+                                                                        ),
+                                                                    ),
+                                                                );
+                                                                return vec![(
+                                                                    buffer_offset..buffer_offset,
+                                                                    (),
+                                                                )];
+                                                            }
+                                                        }
+                                                        Vec::new()
+                                                    },
+                                                )
+                                                .unwrap_or_default();
+                                            if let Some((target_multi_buffer_offset, _)) =
+                                                dbg!(target_anchors.first())
+                                            {
+                                                let target_point_start = multi_buffer_snapshot
+                                                    .offset_to_point(
+                                                        target_multi_buffer_offset.start,
+                                                    );
+                                                let target_point_end = multi_buffer_snapshot
+                                                    .offset_to_point(
+                                                        target_multi_buffer_offset.end,
+                                                    );
+                                                editor.change_selections(
+                                                    SelectionEffects::scroll(Autoscroll::center()),
+                                                    window,
+                                                    cx,
+                                                    |s| {
+                                                        s.select_ranges([
+                                                            target_point_start..target_point_end
+                                                        ])
+                                                    },
+                                                );
+                                            }
+                                        });
+                                    });
+                                }
+
                                 pane.add_item(Box::new(commit_view), true, true, None, window, cx);
                             }
                         })
