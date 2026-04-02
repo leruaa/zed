@@ -335,7 +335,7 @@ impl MentionUri {
             MentionUri::Directory { abs_path } => {
                 let mut url = Url::parse("file:///").unwrap();
                 let mut path = abs_path.to_string_lossy().into_owned();
-                if !path.ends_with('/') {
+                if !path.ends_with('/') && !path.ends_with('\\') {
                     path.push('/');
                 }
                 url.set_path(&path);
