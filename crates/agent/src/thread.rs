@@ -2094,8 +2094,7 @@ impl Thread {
         this.update(cx, |this, _cx| {
             this.pending_message()
                 .tool_results
-                .entry(tool_result.tool_use_id.clone())
-                .or_insert(tool_result);
+                .insert(tool_result.tool_use_id.clone(), tool_result)
         })?;
         Ok(())
     }
