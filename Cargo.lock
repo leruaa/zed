@@ -9411,6 +9411,7 @@ dependencies = [
  "open_ai",
  "open_router",
  "opencode",
+ "parking_lot",
  "pretty_assertions",
  "release_channel",
  "schemars",
