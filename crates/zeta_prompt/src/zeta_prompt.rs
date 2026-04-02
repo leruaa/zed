@@ -927,6 +927,7 @@ fn cursor_in_new_text(
     })
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ParsedOutput {
     /// Text that should replace the editable region
     pub new_editable_region: String,
@@ -934,6 +935,15 @@ pub struct ParsedOutput {
     pub range_in_excerpt: Range<usize>,
     /// Byte offset of the cursor marker within `new_editable_region`, if present
     pub cursor_offset_in_new_editable_region: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CursorPosition {
+    pub path: String,
+    pub row: usize,
+    pub column: usize,
+    pub offset: usize,
+    pub editable_region_offset: usize,
 }
 
 /// Parse model output for the given zeta format
@@ -1020,6 +1030,43 @@ pub fn parse_zeta2_model_output_as_patch(
 ) -> Result<String> {
     let parsed = parse_zeta2_model_output(output, format, prompt_inputs)?;
     parsed_output_to_patch(prompt_inputs, parsed)
+}
+
+pub fn cursor_position_from_parsed_output(
+    prompt_inputs: &ZetaPromptInput,
+    parsed: &ParsedOutput,
+) -> Option<CursorPosition> {
+    let cursor_offset = parsed.cursor_offset_in_new_editable_region?;
+    let editable_region_offset = parsed.range_in_excerpt.start;
+    let excerpt = prompt_inputs.cursor_excerpt.as_ref();
+
+    let editable_region_start_line = excerpt[..editable_region_offset].matches('\n').count();
+
+    let new_editable_region = &parsed.new_editable_region;
+    let prefix_end = cursor_offset.min(new_editable_region.len());
+    let new_region_prefix = &new_editable_region[..prefix_end];
+
+    let row = editable_region_start_line + new_region_prefix.matches('\n').count();
+
+    let column = match new_region_prefix.rfind('\n') {
+        Some(last_newline) => cursor_offset - last_newline - 1,
+        None => {
+            let content_prefix = &excerpt[..editable_region_offset];
+            let content_column = match content_prefix.rfind('\n') {
+                Some(last_newline) => editable_region_offset - last_newline - 1,
+                None => editable_region_offset,
+            };
+            content_column + cursor_offset
+        }
+    };
+
+    Some(CursorPosition {
+        path: prompt_inputs.cursor_path.to_string_lossy().into_owned(),
+        row,
+        column,
+        offset: editable_region_offset + cursor_offset,
+        editable_region_offset: cursor_offset,
+    })
 }
 
 pub fn parsed_output_to_patch(
