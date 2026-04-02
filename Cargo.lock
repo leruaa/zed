@@ -275,7 +275,6 @@ dependencies = [
  "action_log",
  "agent-client-protocol-core",
  "anyhow",
- "async-trait",
  "chrono",
  "client",
  "collections",
