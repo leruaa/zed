@@ -1655,11 +1655,17 @@ impl EditPredictionStore {
                                         predicted_editable_region =
                                             pending_prediction.predicted_editable_region.clone(),
                                         settled_editable_region,
-                                        kept_chars = kept_rate_result.kept_chars,
                                         ts_error_count_before_prediction =
                                             pending_prediction.ts_error_count_before_prediction,
                                         ts_error_count_after_prediction =
                                             pending_prediction.ts_error_count_after_prediction,
+                                        edit_bytes_predicted_new =
+                                            kept_rate_result.predicted_new_chars,
+                                        edit_bytes_final_new = kept_rate_result.final_new_chars,
+                                        edit_bytes_kept = kept_rate_result.kept_chars,
+                                        edit_bytes_discarded = kept_rate_result.discarded_chars,
+                                        edit_bytes_context = kept_rate_result.context_chars,
+                                        edit_bytes_kept_rate = kept_rate_result.kept_rate,
                                         example = pending_prediction.example.take(),
                                         e2e_latency = pending_prediction.e2e_latency.as_millis(),
                                     );
