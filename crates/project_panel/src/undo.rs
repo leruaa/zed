@@ -305,9 +305,8 @@ impl UndoMessage {
 impl Inner {
     async fn manage_undo_and_redo(mut self, mut cx: AsyncApp) {
         loop {
-            let Ok(mut new) = dbg!(self.rx.recv().await) else {
+            let Ok(mut new) = self.rx.recv().await else {
                 // project panel got closed
-                dbg!("wtf the project panel did not get closed right?");
                 return;
             };
 
@@ -553,336 +552,337 @@ impl Inner {
     }
 }
 
-// #[cfg(test)]
-// pub(crate) mod tests {
-//     use crate::{ProjectPanel, project_panel_tests, undo::UndoManager};
-//     use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
-//     use project::{FakeFs, Project, ProjectPath, WorktreeId};
-//     use serde_json::{Value, json};
-//     use std::sync::Arc;
-//     use util::rel_path::rel_path;
-//     use workspace::MultiWorkspace;
+#[cfg(test)]
+pub(crate) mod tests {
+    use crate::{ProjectPanel, project_panel_tests, undo::UndoManager};
+    use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
+    use project::{FakeFs, Project, ProjectPath, WorktreeId};
+    use serde_json::{Value, json};
+    use std::sync::Arc;
+    use util::rel_path::rel_path;
+    use workspace::MultiWorkspace;
 
-//     struct TestContext {
-//         project: Entity<Project>,
-//         panel: Entity<ProjectPanel>,
-//         window: WindowHandle<MultiWorkspace>,
-//     }
+    struct TestContext {
+        project: Entity<Project>,
+        panel: Entity<ProjectPanel>,
+        window: WindowHandle<MultiWorkspace>,
+    }
 
-//     async fn init_test(cx: &mut TestAppContext, tree: Option<Value>) -> TestContext {
-//         project_panel_tests::init_test(cx);
+    async fn init_test(cx: &mut TestAppContext, tree: Option<Value>) -> TestContext {
+        project_panel_tests::init_test(cx);
 
-//         let fs = FakeFs::new(cx.executor());
-//         if let Some(tree) = tree {
-//             fs.insert_tree("/root", tree).await;
-//         }
-//         let project = Project::test(fs.clone(), ["/root".as_ref()], cx).await;
-//         let window =
-//             cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
-//         let workspace = window
-//             .read_with(cx, |mw, _| mw.workspace().clone())
-//             .unwrap();
-//         let cx = &mut VisualTestContext::from_window(window.into(), cx);
-//         let panel = workspace.update_in(cx, ProjectPanel::new);
-//         cx.run_until_parked();
+        let fs = FakeFs::new(cx.executor());
+        if let Some(tree) = tree {
+            fs.insert_tree("/root", tree).await;
+        }
+        let project = Project::test(fs.clone(), ["/root".as_ref()], cx).await;
+        let window =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window
+            .read_with(cx, |mw, _| mw.workspace().clone())
+            .unwrap();
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        let panel = workspace.update_in(cx, ProjectPanel::new);
+        cx.run_until_parked();
 
-//         TestContext {
-//             project,
-//             panel,
-//             window,
-//         }
-//     }
+        TestContext {
+            project,
+            panel,
+            window,
+        }
+    }
 
-//     pub(crate) fn build_create_operation(
-//         worktree_id: WorktreeId,
-//         file_name: &str,
-//     ) -> ProjectPanelOperation {
-//         ProjectPanelOperation::Create(ProjectPath {
-//             path: Arc::from(rel_path(file_name)),
-//             worktree_id,
-//         })
-//     }
+    pub(crate) fn build_create_operation(
+        worktree_id: WorktreeId,
+        file_name: &str,
+    ) -> ProjectPanelOperation {
+        ProjectPanelOperation::Create(ProjectPath {
+            path: Arc::from(rel_path(file_name)),
+            worktree_id,
+        })
+    }
 
-//     pub(crate) fn build_trash_operation(
-//         worktree_id: WorktreeId,
-//         file_name: &str,
-//     ) -> ProjectPanelOperation {
-//         ProjectPanelOperation::Trash(ProjectPath {
-//             path: Arc::from(rel_path(file_name)),
-//             worktree_id,
-//         })
-//     }
+    pub(crate) fn build_trash_operation(
+        worktree_id: WorktreeId,
+        file_name: &str,
+    ) -> ProjectPanelOperation {
+        ProjectPanelOperation::Trash(ProjectPath {
+            path: Arc::from(rel_path(file_name)),
+            worktree_id,
+        })
+    }
 
-//     pub(crate) fn build_rename_operation(
-//         worktree_id: WorktreeId,
-//         from: &str,
-//         to: &str,
-//     ) -> ProjectPanelOperation {
-//         let from_path = Arc::from(rel_path(from));
-//         let to_path = Arc::from(rel_path(to));
+    pub(crate) fn build_rename_operation(
+        worktree_id: WorktreeId,
+        from: &str,
+        to: &str,
+    ) -> ProjectPanelOperation {
+        let from_path = Arc::from(rel_path(from));
+        let to_path = Arc::from(rel_path(to));
 
-//         ProjectPanelOperation::Rename(
-//             ProjectPath {
-//                 worktree_id,
-//                 path: from_path,
-//             },
-//             ProjectPath {
-//                 worktree_id,
-//                 path: to_path,
-//             },
-//         )
-//     }
+        ProjectPanelOperation::Rename(
+            ProjectPath {
+                worktree_id,
+                path: from_path,
+            },
+            ProjectPath {
+                worktree_id,
+                path: to_path,
+            },
+        )
+    }
 
-//     async fn rename(
-//         panel: &Entity<ProjectPanel>,
-//         from: &str,
-//         to: &str,
-//         cx: &mut VisualTestContext,
-//     ) {
-//         project_panel_tests::select_path(panel, from, cx);
-//         panel.update_in(cx, |panel, window, cx| {
-//             panel.rename(&Default::default(), window, cx)
-//         });
-//         cx.run_until_parked();
+    async fn rename(
+        panel: &Entity<ProjectPanel>,
+        from: &str,
+        to: &str,
+        cx: &mut VisualTestContext,
+    ) {
+        project_panel_tests::select_path(panel, from, cx);
+        panel.update_in(cx, |panel, window, cx| {
+            panel.rename(&Default::default(), window, cx)
+        });
+        cx.run_until_parked();
 
-//         panel
-//             .update_in(cx, |panel, window, cx| {
-//                 panel
-//                     .filename_editor
-//                     .update(cx, |editor, cx| editor.set_text(to, window, cx));
-//                 panel.confirm_edit(true, window, cx).unwrap()
-//             })
-//             .await
-//             .unwrap();
-//         cx.run_until_parked();
-//     }
+        panel
+            .update_in(cx, |panel, window, cx| {
+                panel
+                    .filename_editor
+                    .update(cx, |editor, cx| editor.set_text(to, window, cx));
+                panel.confirm_edit(true, window, cx).unwrap()
+            })
+            .await
+            .unwrap();
+        cx.run_until_parked();
+    }
 
-//     #[gpui::test]
-//     async fn test_limit(cx: &mut TestAppContext) {
-//         let test_context = init_test(cx, None).await;
-//         let worktree_id = test_context.project.update(cx, |project, cx| {
-//             project.visible_worktrees(cx).next().unwrap().read(cx).id()
-//         });
+    #[gpui::test]
+    async fn test_limit(cx: &mut TestAppContext) {
+        let test_context = init_test(cx, None).await;
+        let worktree_id = test_context.project.update(cx, |project, cx| {
+            project.visible_worktrees(cx).next().unwrap().read(cx).id()
+        });
 
-//         // Since we're updating the `ProjectPanel`'s undo manager with one whose
-//         // limit is 3 operations, we only need to create 4 operations which
-//         // we'll record, in order to confirm that the oldest operation is
-//         // evicted.
-//         let operation_a = build_create_operation(worktree_id, "file_a.txt");
-//         let operation_b = build_create_operation(worktree_id, "file_b.txt");
-//         let operation_c = build_create_operation(worktree_id, "file_c.txt");
-//         let operation_d = build_create_operation(worktree_id, "file_d.txt");
+        // Since we're updating the `ProjectPanel`'s undo manager with one whose
+        // limit is 3 operations, we only need to create 4 operations which
+        // we'll record, in order to confirm that the oldest operation is
+        // evicted.
+        let operation_a = build_create_operation(worktree_id, "file_a.txt");
+        let operation_b = build_create_operation(worktree_id, "file_b.txt");
+        let operation_c = build_create_operation(worktree_id, "file_c.txt");
+        let operation_d = build_create_operation(worktree_id, "file_d.txt");
 
-//         test_context.panel.update(cx, move |panel, cx| {
-//             panel.undo_manager =
-//                 UndoManager::new_with_limit(panel.workspace.clone(), cx.weak_entity(), 3);
-//             panel.undo_manager.record(operation_a);
-//             panel.undo_manager.record(operation_b);
-//             panel.undo_manager.record(operation_c);
-//             panel.undo_manager.record(operation_d);
+        test_context.panel.update(cx, move |panel, cx| {
+            panel.undo_manager =
+                UndoManager::new_with_limit(panel.workspace.clone(), cx.weak_entity(), 3);
+            panel.undo_manager.record(operation_a);
+            panel.undo_manager.record(operation_b);
+            panel.undo_manager.record(operation_c);
+            panel.undo_manager.record(operation_d);
 
-//             assert_eq!(panel.undo_manager.undo_stack.len(), 3);
-//         });
-//     }
-//     #[gpui::test]
-//     async fn test_undo_redo_stacks(cx: &mut TestAppContext) {
-//         let TestContext {
-//             window,
-//             panel,
-//             project,
-//             ..
-//         } = init_test(
-//             cx,
-//             Some(json!({
-//                 "a.txt": "",
-//                 "b.txt": ""
-//             })),
-//         )
-//         .await;
-//         let worktree_id = project.update(cx, |project, cx| {
-//             project.visible_worktrees(cx).next().unwrap().read(cx).id()
-//         });
-//         let cx = &mut VisualTestContext::from_window(window.into(), cx);
+            assert_eq!(panel.undo_manager.undo_stack.len(), 3);
+        });
+    }
 
-//         // Start by renaming `src/file_a.txt` to `src/file_1.txt` and asserting
-//         // we get the correct inverse operation in the
-//         // `UndoManager::undo_stackand asserting we get the correct inverse
-//         // operation in the `UndoManager::undo_stack`.
-//         rename(&panel, "root/a.txt", "1.txt", cx).await;
-//         panel.update(cx, |panel, _cx| {
-//             assert_eq!(
-//                 panel.undo_manager.undo_stack,
-//                 vec![build_rename_operation(worktree_id, "1.txt", "a.txt")]
-//             );
-//             assert!(panel.undo_manager.redo_stack.is_empty());
-//         });
+    #[gpui::test]
+    async fn test_undo_redo_stacks(cx: &mut TestAppContext) {
+        let TestContext {
+            window,
+            panel,
+            project,
+            ..
+        } = init_test(
+            cx,
+            Some(json!({
+                "a.txt": "",
+                "b.txt": ""
+            })),
+        )
+        .await;
+        let worktree_id = project.update(cx, |project, cx| {
+            project.visible_worktrees(cx).next().unwrap().read(cx).id()
+        });
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
 
-//         // After undoing, the operation to be executed should be popped from
-//         // `UndoManager::undo_stack` and its inverse operation pushed to
-//         // `UndoManager::redo_stack`.
-//         panel.update_in(cx, |panel, window, cx| {
-//             panel.undo(&Default::default(), window, cx);
-//         });
-//         cx.run_until_parked();
+        // Start by renaming `src/file_a.txt` to `src/file_1.txt` and asserting
+        // we get the correct inverse operation in the
+        // `UndoManager::undo_stackand asserting we get the correct inverse
+        // operation in the `UndoManager::undo_stack`.
+        rename(&panel, "root/a.txt", "1.txt", cx).await;
+        panel.update(cx, |panel, _cx| {
+            assert_eq!(
+                panel.undo_manager.undo_stack,
+                vec![build_rename_operation(worktree_id, "1.txt", "a.txt")]
+            );
+            assert!(panel.undo_manager.redo_stack.is_empty());
+        });
 
-//         panel.update(cx, |panel, _cx| {
-//             assert!(panel.undo_manager.undo_stack.is_empty());
-//             assert_eq!(
-//                 panel.undo_manager.redo_stack,
-//                 vec![build_rename_operation(worktree_id, "a.txt", "1.txt")]
-//             );
-//         });
+        // After undoing, the operation to be executed should be popped from
+        // `UndoManager::undo_stack` and its inverse operation pushed to
+        // `UndoManager::redo_stack`.
+        panel.update_in(cx, |panel, window, cx| {
+            panel.undo(&Default::default(), window, cx);
+        });
+        cx.run_until_parked();
 
-//         // Redoing should have the same effect as undoing, but in reverse.
-//         panel.update_in(cx, |panel, window, cx| {
-//             panel.redo(&Default::default(), window, cx);
-//         });
-//         cx.run_until_parked();
+        panel.update(cx, |panel, _cx| {
+            assert!(panel.undo_manager.undo_stack.is_empty());
+            assert_eq!(
+                panel.undo_manager.redo_stack,
+                vec![build_rename_operation(worktree_id, "a.txt", "1.txt")]
+            );
+        });
 
-//         panel.update(cx, |panel, _cx| {
-//             assert_eq!(
-//                 panel.undo_manager.undo_stack,
-//                 vec![build_rename_operation(worktree_id, "1.txt", "a.txt")]
-//             );
-//             assert!(panel.undo_manager.redo_stack.is_empty());
-//         });
-//     }
+        // Redoing should have the same effect as undoing, but in reverse.
+        panel.update_in(cx, |panel, window, cx| {
+            panel.redo(&Default::default(), window, cx);
+        });
+        cx.run_until_parked();
 
-//     #[gpui::test]
-//     async fn test_undo_redo_trash(cx: &mut TestAppContext) {
-//         let TestContext {
-//             window,
-//             panel,
-//             project,
-//             ..
-//         } = init_test(
-//             cx,
-//             Some(json!({
-//                 "a.txt": "",
-//                 "b.txt": ""
-//             })),
-//         )
-//         .await;
-//         let worktree_id = project.update(cx, |project, cx| {
-//             project.visible_worktrees(cx).next().unwrap().read(cx).id()
-//         });
-//         let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        panel.update(cx, |panel, _cx| {
+            assert_eq!(
+                panel.undo_manager.undo_stack,
+                vec![build_rename_operation(worktree_id, "1.txt", "a.txt")]
+            );
+            assert!(panel.undo_manager.redo_stack.is_empty());
+        });
+    }
 
-//         // Start by setting up the `UndoManager::undo_stack` such that, undoing
-//         // the last user operation will trash `a.txt`.
-//         panel.update(cx, |panel, _cx| {
-//             panel
-//                 .undo_manager
-//                 .undo_stack
-//                 .push_back(build_trash_operation(worktree_id, "a.txt"));
-//         });
+    #[gpui::test]
+    async fn test_undo_redo_trash(cx: &mut TestAppContext) {
+        let TestContext {
+            window,
+            panel,
+            project,
+            ..
+        } = init_test(
+            cx,
+            Some(json!({
+                "a.txt": "",
+                "b.txt": ""
+            })),
+        )
+        .await;
+        let worktree_id = project.update(cx, |project, cx| {
+            project.visible_worktrees(cx).next().unwrap().read(cx).id()
+        });
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
 
-//         // Undoing should now delete the file and update the
-//         // `UndoManager::redo_stack` state with a new `Create` operation.
-//         panel.update_in(cx, |panel, window, cx| {
-//             panel.undo(&Default::default(), window, cx);
-//         });
-//         cx.run_until_parked();
+        // Start by setting up the `UndoManager::undo_stack` such that, undoing
+        // the last user operation will trash `a.txt`.
+        panel.update(cx, |panel, _cx| {
+            panel
+                .undo_manager
+                .undo_stack
+                .push_back(build_trash_operation(worktree_id, "a.txt"));
+        });
 
-//         panel.update(cx, |panel, _cx| {
-//             assert!(panel.undo_manager.undo_stack.is_empty());
-//             assert_eq!(
-//                 panel.undo_manager.redo_stack,
-//                 vec![build_create_operation(worktree_id, "a.txt")]
-//             );
-//         });
+        // Undoing should now delete the file and update the
+        // `UndoManager::redo_stack` state with a new `Create` operation.
+        panel.update_in(cx, |panel, window, cx| {
+            panel.undo(&Default::default(), window, cx);
+        });
+        cx.run_until_parked();
 
-//         // Redoing should create the file again and pop the operation from
-//         // `UndoManager::redo_stack`.
-//         panel.update_in(cx, |panel, window, cx| {
-//             panel.redo(&Default::default(), window, cx);
-//         });
-//         cx.run_until_parked();
+        panel.update(cx, |panel, _cx| {
+            assert!(panel.undo_manager.undo_stack.is_empty());
+            assert_eq!(
+                panel.undo_manager.redo_stack,
+                vec![build_create_operation(worktree_id, "a.txt")]
+            );
+        });
 
-//         panel.update(cx, |panel, _cx| {
-//             assert_eq!(
-//                 panel.undo_manager.undo_stack,
-//                 vec![build_trash_operation(worktree_id, "a.txt")]
-//             );
-//             assert!(panel.undo_manager.redo_stack.is_empty());
-//         });
-//     }
+        // Redoing should create the file again and pop the operation from
+        // `UndoManager::redo_stack`.
+        panel.update_in(cx, |panel, window, cx| {
+            panel.redo(&Default::default(), window, cx);
+        });
+        cx.run_until_parked();
 
-//     #[gpui::test]
-//     async fn test_undo_redo_batch(cx: &mut TestAppContext) {
-//         let TestContext {
-//             window,
-//             panel,
-//             project,
-//             ..
-//         } = init_test(
-//             cx,
-//             Some(json!({
-//                 "a.txt": "",
-//                 "b.txt": ""
-//             })),
-//         )
-//         .await;
-//         let worktree_id = project.update(cx, |project, cx| {
-//             project.visible_worktrees(cx).next().unwrap().read(cx).id()
-//         });
-//         let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        panel.update(cx, |panel, _cx| {
+            assert_eq!(
+                panel.undo_manager.undo_stack,
+                vec![build_trash_operation(worktree_id, "a.txt")]
+            );
+            assert!(panel.undo_manager.redo_stack.is_empty());
+        });
+    }
 
-//         // There's currently no way to trigger two file renames in a single
-//         // operation using the `ProjectPanel`. As such, we'll directly record
-//         // the batch of operations in `UndoManager`, simulating that `1.txt` and
-//         // `2.txt` had been renamed to `a.txt` and `b.txt`, respectively.
-//         panel.update(cx, |panel, _cx| {
-//             panel.undo_manager.record_batch(vec![
-//                 build_rename_operation(worktree_id, "1.txt", "a.txt"),
-//                 build_rename_operation(worktree_id, "2.txt", "b.txt"),
-//             ]);
+    #[gpui::test]
+    async fn test_undo_redo_batch(cx: &mut TestAppContext) {
+        let TestContext {
+            window,
+            panel,
+            project,
+            ..
+        } = init_test(
+            cx,
+            Some(json!({
+                "a.txt": "",
+                "b.txt": ""
+            })),
+        )
+        .await;
+        let worktree_id = project.update(cx, |project, cx| {
+            project.visible_worktrees(cx).next().unwrap().read(cx).id()
+        });
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
 
-//             assert_eq!(
-//                 panel.undo_manager.undo_stack,
-//                 vec![ProjectPanelOperation::Batch(vec![
-//                     build_rename_operation(worktree_id, "b.txt", "2.txt"),
-//                     build_rename_operation(worktree_id, "a.txt", "1.txt"),
-//                 ])]
-//             );
-//             assert!(panel.undo_manager.redo_stack.is_empty());
-//         });
+        // There's currently no way to trigger two file renames in a single
+        // operation using the `ProjectPanel`. As such, we'll directly record
+        // the batch of operations in `UndoManager`, simulating that `1.txt` and
+        // `2.txt` had been renamed to `a.txt` and `b.txt`, respectively.
+        panel.update(cx, |panel, _cx| {
+            panel.undo_manager.record_batch(vec![
+                build_rename_operation(worktree_id, "1.txt", "a.txt"),
+                build_rename_operation(worktree_id, "2.txt", "b.txt"),
+            ]);
 
-//         panel.update_in(cx, |panel, window, cx| {
-//             panel.undo(&Default::default(), window, cx);
-//         });
-//         cx.run_until_parked();
+            assert_eq!(
+                panel.undo_manager.undo_stack,
+                vec![ProjectPanelOperation::Batch(vec![
+                    build_rename_operation(worktree_id, "b.txt", "2.txt"),
+                    build_rename_operation(worktree_id, "a.txt", "1.txt"),
+                ])]
+            );
+            assert!(panel.undo_manager.redo_stack.is_empty());
+        });
 
-//         // Since the operations in the `Batch` are meant to be done in order,
-//         // the inverse should have the operations in the opposite order to avoid
-//         // dependencies. For example, creating a `src/` folder come before
-//         // creating the `src/file_a.txt` file, but when undoing, the file should
-//         // be trashed first.
-//         panel.update(cx, |panel, _cx| {
-//             assert!(panel.undo_manager.undo_stack.is_empty());
-//             assert_eq!(
-//                 panel.undo_manager.redo_stack,
-//                 vec![ProjectPanelOperation::Batch(vec![
-//                     build_rename_operation(worktree_id, "1.txt", "a.txt"),
-//                     build_rename_operation(worktree_id, "2.txt", "b.txt"),
-//                 ])]
-//             );
-//         });
+        panel.update_in(cx, |panel, window, cx| {
+            panel.undo(&Default::default(), window, cx);
+        });
+        cx.run_until_parked();
 
-//         panel.update_in(cx, |panel, window, cx| {
-//             panel.redo(&Default::default(), window, cx);
-//         });
-//         cx.run_until_parked();
+        // Since the operations in the `Batch` are meant to be done in order,
+        // the inverse should have the operations in the opposite order to avoid
+        // dependencies. For example, creating a `src/` folder come before
+        // creating the `src/file_a.txt` file, but when undoing, the file should
+        // be trashed first.
+        panel.update(cx, |panel, _cx| {
+            assert!(panel.undo_manager.undo_stack.is_empty());
+            assert_eq!(
+                panel.undo_manager.redo_stack,
+                vec![ProjectPanelOperation::Batch(vec![
+                    build_rename_operation(worktree_id, "1.txt", "a.txt"),
+                    build_rename_operation(worktree_id, "2.txt", "b.txt"),
+                ])]
+            );
+        });
 
-//         panel.update(cx, |panel, _cx| {
-//             assert_eq!(
-//                 panel.undo_manager.undo_stack,
-//                 vec![ProjectPanelOperation::Batch(vec![
-//                     build_rename_operation(worktree_id, "b.txt", "2.txt"),
-//                     build_rename_operation(worktree_id, "a.txt", "1.txt"),
-//                 ])]
-//             );
-//             assert!(panel.undo_manager.redo_stack.is_empty());
-//         });
-//     }
-// }
+        panel.update_in(cx, |panel, window, cx| {
+            panel.redo(&Default::default(), window, cx);
+        });
+        cx.run_until_parked();
+
+        panel.update(cx, |panel, _cx| {
+            assert_eq!(
+                panel.undo_manager.undo_stack,
+                vec![ProjectPanelOperation::Batch(vec![
+                    build_rename_operation(worktree_id, "b.txt", "2.txt"),
+                    build_rename_operation(worktree_id, "a.txt", "1.txt"),
+                ])]
+            );
+            assert!(panel.undo_manager.redo_stack.is_empty());
+        });
+    }
+}
