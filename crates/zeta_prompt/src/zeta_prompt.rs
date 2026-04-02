@@ -106,10 +106,19 @@ impl std::fmt::Display for ZetaFormat {
 
 impl ZetaFormat {
     pub fn parse(format_name: &str) -> Result<Self> {
+        let lower = format_name.to_lowercase();
+
+        // Exact case-insensitive match takes priority, bypassing ambiguity checks.
+        for variant in ZetaFormat::iter() {
+            if <&'static str>::from(&variant).to_lowercase() == lower {
+                return Ok(variant);
+            }
+        }
+
         let mut results = ZetaFormat::iter().filter(|version| {
             <&'static str>::from(version)
                 .to_lowercase()
-                .contains(&format_name.to_lowercase())
+                .contains(&lower)
         });
         let Some(result) = results.next() else {
             anyhow::bail!(
