@@ -1708,8 +1708,10 @@ impl EditPredictionStore {
             .collect::<String>();
         let editable_anchor_range_for_result =
             edited_buffer_snapshot.anchor_range_inside(editable_offset_range.clone());
-        let predicted_editable_region =
-            edit_preview.text_for_range_in_result(editable_anchor_range_for_result.clone());
+        let predicted_editable_region = edit_preview
+            .result_text_snapshot()
+            .text_for_range(editable_anchor_range_for_result.clone())
+            .collect();
         let ts_error_count_before_prediction = crate::metrics::count_tree_sitter_errors(
             edited_buffer_snapshot
                 .syntax_layers_for_range(editable_anchor_range_for_result.clone(), true),

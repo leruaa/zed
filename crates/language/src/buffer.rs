@@ -878,14 +878,6 @@ impl EditPreview {
         })
     }
 
-    pub fn text_for_range_in_result(&self, range: Range<Anchor>) -> String {
-        let start = range.start.bias_left(&self.old_snapshot);
-        let end = range.end.bias_right(&self.old_snapshot);
-        self.applied_edits_snapshot
-            .text_for_range(start..end)
-            .collect()
-    }
-
     pub fn result_text_snapshot(&self) -> &text::BufferSnapshot {
         &self.applied_edits_snapshot
     }
