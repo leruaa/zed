@@ -5,7 +5,7 @@ use crate::{
     repair,
 };
 use anyhow::{Context as _, Result};
-use zeta_prompt::{ParsedOutput, ZetaFormat, parse_zeta2_model_output, parsed_output_to_patch};
+use zeta_prompt::{ZetaFormat, parse_zeta2_model_output, parsed_output_to_patch};
 
 pub fn run_parse_output(example: &mut Example) -> Result<()> {
     example

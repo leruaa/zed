@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, fmt::Write as _, mem, path::Path, sync::Arc};
 use telemetry_events::EditPredictionRating;
 
-pub use zeta_prompt::udiff::{CURSOR_POSITION_MARKER, encode_cursor_in_patch};
+pub use zeta_prompt::udiff::{
+    CURSOR_POSITION_MARKER, encode_cursor_in_patch, extract_cursor_from_patch,
+};
 pub const INLINE_CURSOR_MARKER: &str = "<|user_cursor|>";
 
 /// Maximum cursor file size to capture (64KB).
@@ -450,53 +452,7 @@ impl ExampleSpec {
     pub fn expected_patches_with_cursor_positions(&self) -> Vec<(String, Option<usize>)> {
         self.expected_patches
             .iter()
-            .map(|patch| {
-                let mut clean_patch = String::new();
-                let mut cursor_offset: Option<usize> = None;
-                let mut line_start_offset = 0usize;
-                let mut prev_line_start_offset = 0usize;
-
-                for line in patch.lines() {
-                    let diff_line = DiffLine::parse(line);
-
-                    match &diff_line {
-                        DiffLine::Garbage(content)
-                            if content.starts_with('#')
-                                && content.contains(CURSOR_POSITION_MARKER) =>
-                        {
-                            let caret_column = if let Some(caret_pos) = content.find('^') {
-                                caret_pos
-                            } else if let Some(_) = content.find('<') {
-                                0
-                            } else {
-                                continue;
-                            };
-                            let cursor_column = caret_column.saturating_sub('#'.len_utf8());
-                            cursor_offset = Some(prev_line_start_offset + cursor_column);
-                        }
-                        _ => {
-                            if !clean_patch.is_empty() {
-                                clean_patch.push('\n');
-                            }
-                            clean_patch.push_str(line);
-
-                            match diff_line {
-                                DiffLine::Addition(content) | DiffLine::Context(content) => {
-                                    prev_line_start_offset = line_start_offset;
-                                    line_start_offset += content.len() + 1;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-
-                if patch.ends_with('\n') && !clean_patch.is_empty() {
-                    clean_patch.push('\n');
-                }
-
-                (clean_patch, cursor_offset)
-            })
+            .map(|patch| extract_cursor_from_patch(patch))
             .collect()
     }
 
